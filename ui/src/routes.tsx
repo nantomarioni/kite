@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
@@ -11,6 +12,8 @@ import { Overview } from './pages/overview'
 import { ResourceDetail } from './pages/resource-detail'
 import { ResourceList } from './pages/resource-list'
 import { SettingsPage } from './pages/settings'
+
+const AppView = lazy(() => import('./components/AppView/AppView'))
 
 const subPath = getSubPath()
 
@@ -49,6 +52,14 @@ export const router = createBrowserRouter(
         {
           path: 'settings',
           element: <SettingsPage />,
+        },
+        {
+          path: 'app-view',
+          element: (
+            <Suspense fallback={<div>Loading...</div>}>
+              <AppView />
+            </Suspense>
+          ),
         },
         {
           path: 'crds/:crd',

@@ -53,6 +53,7 @@
     "jumpToBottom": "跳到底部"
   },
   "nav": {
+    "appView": "应用视图",
     "overview": "概览",
     "workloads": "工作负载",
     "pods": "容器组",

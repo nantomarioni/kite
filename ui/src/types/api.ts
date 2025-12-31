@@ -446,3 +446,14 @@ export interface ResourceTemplate {
   description: string
   yaml: string
 }
+
+export interface AppViewResponse {
+  deployments: Deployment[]
+  statefulSets: StatefulSet[]
+  services: Service[]
+  ingresses: Ingress[]
+  pods: Pod[]
+  configMaps: ConfigMap[]
+  secrets: Secret[]
+  pvcs: PersistentVolumeClaim[]
+}

@@ -382,6 +382,7 @@
     "updateAvailable": "A newer Kite version is available"
   },
   "nav": {
+    "appView": "Application View",
     "overview": "Overview",
     "pods": "Pods",
     "deployments": "Deployments",

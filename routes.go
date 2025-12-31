@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zxh326/kite/pkg/ai"
 	"github.com/zxh326/kite/pkg/apikeys"
+	"github.com/zxh326/kite/pkg/appview"
 	"github.com/zxh326/kite/pkg/audit"
 	"github.com/zxh326/kite/pkg/auth"
 	"github.com/zxh326/kite/pkg/cluster"
@@ -207,4 +208,5 @@ func registerClusterProtectedRoutes(api *gin.RouterGroup, helmChartsHandler *hel
 
 	api.Use(middleware.RBACMiddleware())
 	resources.RegisterRoutes(api)
+	appview.RegisterHandlers(api.Group("/app-view"))
 }

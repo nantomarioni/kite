@@ -386,6 +386,7 @@
     "updateAvailable": "有新的 Kite 版本可用"
   },
   "nav": {
+    "appView": "应用视图",
     "overview": "概览",
     "workloads": "工作负载",
     "pods": "Pods",

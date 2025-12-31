@@ -8,6 +8,7 @@ import {
   IconDatabase,
   IconFileDatabase,
   IconKey,
+  IconLayoutDashboard,
   IconLoadBalancer,
   IconLock,
   IconMap,
@@ -36,6 +37,7 @@ type SidebarGroupKey =
   | 'sidebar.groups.application'
 
 export const resourceIconMap = {
+  IconLayoutDashboard,
   IconBox,
   IconRocket,
   IconStack2,

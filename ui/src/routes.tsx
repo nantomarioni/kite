@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 
 import App, { StandaloneAIChatApp } from './App'
@@ -15,6 +16,8 @@ import { ResourceDetail } from './pages/resource-detail'
 import { ResourceList } from './pages/resource-list'
 import { SettingsPage } from './pages/settings'
 import { PluginPage } from './plugins/plugin-page'
+
+const AppView = lazy(() => import('./components/AppView/AppView'))
 
 const subPath = getSubPath()
 
@@ -71,6 +74,14 @@ export const router = createBrowserRouter(
         {
           path: 'settings',
           element: <SettingsPage />,
+        },
+        {
+          path: 'app-view',
+          element: (
+            <Suspense fallback={<div>Loading...</div>}>
+              <AppView />
+            </Suspense>
+          ),
         },
         {
           path: 'crds/:crd',

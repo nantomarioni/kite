@@ -34,6 +34,7 @@ import {
   IconTopologyBus,
   IconUser,
   IconUsers,
+  IconLayoutDashboard,
 } from '@tabler/icons-react'
 
 import {
@@ -71,6 +72,7 @@ const iconMap = {
   IconBell,
   IconCode,
   IconArrowsHorizontal,
+  IconLayoutDashboard,
 }
 
 const getIconName = (iconComponent: React.ComponentType): string => {
@@ -120,6 +122,7 @@ interface SidebarConfigProviderProps {
 
 const defaultMenus: DefaultMenus = {
   'sidebar.groups.workloads': [
+    { titleKey: 'nav.appView', url: '/app-view', icon: IconLayoutDashboard },
     { titleKey: 'nav.pods', url: '/pods', icon: IconBox },
     { titleKey: 'nav.deployments', url: '/deployments', icon: IconRocket },
     {

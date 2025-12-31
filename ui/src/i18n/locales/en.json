@@ -62,6 +62,7 @@
     "resetToDefault": "Reset to Default"
   },
   "nav": {
+    "appView": "Application View",
     "overview": "Overview",
     "pods": "Pods",
     "deployments": "Deployments",

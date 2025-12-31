@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zxh326/kite/internal"
+	"github.com/zxh326/kite/pkg/appview"
 	"github.com/zxh326/kite/pkg/auth"
 	"github.com/zxh326/kite/pkg/cluster"
 	"github.com/zxh326/kite/pkg/common"
@@ -198,6 +199,7 @@ func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager) {
 
 		api.Use(middleware.RBACMiddleware())
 		resources.RegisterRoutes(api)
+		appview.RegisterHandlers(api.Group("/app-view"))
 	}
 }
 

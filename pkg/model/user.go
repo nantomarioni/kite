@@ -398,6 +398,49 @@ func ListAPIKeyUsers() (users []User, err error) {
 	return users, err
 }
 
+// FindOrCreateAuthProxyUser finds or creates a user from auth proxy headers.
+// Uses uid (stored in Sub field) as the unique identifier.
+func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []string) (*User, error) {
+	if uid == "" {
+		return nil, errors.New("auth proxy uid is empty")
+	}
+
+	var existingUser User
+	now := time.Now()
+
+	if err := DB.Where("sub = ?", uid).First(&existingUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Create new user
+			newUser := &User{
+				Username:    username,
+				Name:        name,
+				Sub:         uid,
+				Provider:    common.AuthProxyProvider,
+				OIDCGroups:  groups,
+				Enabled:     true,
+				LastLoginAt: &now,
+			}
+			if err := DB.Create(newUser).Error; err != nil {
+				return nil, err
+			}
+			return newUser, nil
+		}
+		return nil, err
+	}
+
+	// Update existing user with latest info
+	existingUser.Username = username
+	existingUser.Name = name
+	existingUser.OIDCGroups = groups
+	existingUser.LastLoginAt = &now
+	if err := DB.Save(&existingUser).Error; err != nil {
+		return nil, err
+	}
+	InvalidateUserCache(uint64(existingUser.ID))
+
+	return &existingUser, nil
+}
+
 var (
 	ErrUserProviderConflict = errors.New("user exists with different provider")
 

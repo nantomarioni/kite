@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -272,6 +273,27 @@ func (h *AuthHandler) RequireAuth() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+
+		// Auth Proxy authentication
+		if common.AuthProxyEnabled {
+			user, err := h.handleAuthProxyLogin(c)
+			if err == nil && user != nil {
+				user.Roles = rbac.GetUserRoles(*user)
+				c.Set("user", *user)
+				c.Next()
+				return
+			}
+			// If auth proxy is enabled but headers are missing, this is an error
+			// because we expect all requests to come through the proxy
+			if err != nil {
+				klog.V(1).Infof("Auth proxy login failed: %v", err)
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Auth proxy authentication required",
+			})
+			c.Abort()
+			return
+		}
 		authHeader := c.GetHeader("Authorization")
 		// bot token
 		if authHeader != "" {
@@ -328,6 +350,49 @@ func (h *AuthHandler) RequireAuth() gin.HandlerFunc {
 		c.Set("user", *user)
 		c.Next()
 	}
+}
+
+// handleAuthProxyLogin handles authentication via reverse proxy headers.
+// It extracts user info from trusted headers and creates/updates the user.
+func (h *AuthHandler) handleAuthProxyLogin(c *gin.Context) (*model.User, error) {
+	uid := c.GetHeader(common.AuthProxyHeaderUID)
+	if uid == "" {
+		return nil, fmt.Errorf("missing required header: %s", common.AuthProxyHeaderUID)
+	}
+
+	username := c.GetHeader(common.AuthProxyHeaderUsername)
+	if username == "" {
+		username = uid // Fall back to UID if username not provided
+	}
+
+	name := c.GetHeader(common.AuthProxyHeaderName)
+	email := c.GetHeader(common.AuthProxyHeaderEmail)
+
+	// Parse groups from comma-separated header
+	groupsHeader := c.GetHeader(common.AuthProxyHeaderGroups)
+	var groups []string
+	if groupsHeader != "" {
+		for _, g := range strings.Split(groupsHeader, "|") {
+			g = strings.TrimSpace(g)
+			if g != "" {
+				groups = append(groups, g)
+			}
+		}
+	}
+
+	klog.V(1).Infof("Auth proxy login: uid=%s, username=%s, name=%s, groups=%v",
+		uid, username, name, groups)
+
+	user, err := model.FindOrCreateAuthProxyUser(uid, username, name, email, groups)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find/create auth proxy user: %w", err)
+	}
+
+	if !user.Enabled {
+		return nil, fmt.Errorf("user %s is disabled", user.Key())
+	}
+
+	return user, nil
 }
 
 func (h *AuthHandler) RequireAdmin() gin.HandlerFunc {

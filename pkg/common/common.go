@@ -41,7 +41,17 @@ var (
 	DisableGZIP         = true
 	DisableVersionCheck = false
 
-	APIKeyProvider = "api_key"
+	APIKeyProvider    = "api_key"
+	AuthProxyProvider = "authproxy"
+
+	// Auth Proxy configuration
+	AuthProxyEnabled        = false
+	AuthProxyHeaderUsername = "X-Authentik-Username"
+	AuthProxyHeaderEmail    = "X-Authentik-Email"
+	AuthProxyHeaderName     = "X-Authentik-Name"
+	AuthProxyHeaderUID      = "X-Authentik-Uid"
+	AuthProxyHeaderGroups   = "X-Authentik-Groups"
+	AuthProxyDefaultRole    = ""
 )
 
 func LoadEnvs() {
@@ -99,5 +109,29 @@ func LoadEnvs() {
 		}
 		Base = strings.TrimRight(v, "/")
 		klog.Infof("Using base path: %s", Base)
+	}
+
+	// Auth Proxy configuration
+	if v := os.Getenv("AUTH_PROXY_ENABLED"); v == "true" {
+		AuthProxyEnabled = true
+		klog.Infof("Auth proxy mode enabled")
+	}
+	if v := os.Getenv("AUTH_PROXY_HEADER_USERNAME"); v != "" {
+		AuthProxyHeaderUsername = v
+	}
+	if v := os.Getenv("AUTH_PROXY_HEADER_EMAIL"); v != "" {
+		AuthProxyHeaderEmail = v
+	}
+	if v := os.Getenv("AUTH_PROXY_HEADER_NAME"); v != "" {
+		AuthProxyHeaderName = v
+	}
+	if v := os.Getenv("AUTH_PROXY_HEADER_UID"); v != "" {
+		AuthProxyHeaderUID = v
+	}
+	if v := os.Getenv("AUTH_PROXY_HEADER_GROUPS"); v != "" {
+		AuthProxyHeaderGroups = v
+	}
+	if v := os.Getenv("AUTH_PROXY_DEFAULT_ROLE"); v != "" {
+		AuthProxyDefaultRole = v
 	}
 }

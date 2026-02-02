@@ -34,6 +34,11 @@ export interface VPASpec {
   updatePolicy?: {
     updateMode?: 'Off' | 'Initial' | 'Recreate' | 'Auto'
     minReplicas?: number
+    // evictionRequirements for VPA v1beta2+ (optional)
+    evictionRequirements?: Array<{
+      resources?: string[]
+      changeRequirement?: 'TargetHigherThanRequests' | 'TargetLowerThanRequests'
+    }>
   }
   resourcePolicy?: {
     containerPolicies?: ContainerResourcePolicy[]
@@ -89,4 +94,46 @@ export interface VerticalPodAutoscalerList {
     resourceVersion?: string
   }
   items: VerticalPodAutoscaler[]
+}
+
+// Workload types for fetching target resources
+export type WorkloadKind = 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'ReplicaSet' | 'ReplicationController' | 'Job' | 'CronJob'
+
+export interface ContainerResources {
+  requests?: ResourceList
+  limits?: ResourceList
+}
+
+export interface WorkloadContainer {
+  name: string
+  image?: string
+  resources?: ContainerResources
+}
+
+// Comparison data for VPA recommendations vs current workload
+export interface VPAResourceComparison {
+  containerName: string
+  current: {
+    requests: ResourceList
+    limits: ResourceList
+  }
+  recommended: {
+    target: ResourceList
+    lowerBound: ResourceList
+    upperBound: ResourceList
+  }
+  policy?: ContainerResourcePolicy
+  // Indicates if VPA is actively managing this container
+  isManaged: boolean
+  // Indicates if current resources match recommendations (within tolerance)
+  isOptimal: boolean
+  // Difference between current and recommended
+  cpuDiff?: {
+    requestsDiff: number // percentage difference
+    limitsDiff?: number
+  }
+  memoryDiff?: {
+    requestsDiff: number
+    limitsDiff?: number
+  }
 }

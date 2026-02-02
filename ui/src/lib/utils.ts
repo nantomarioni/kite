@@ -154,6 +154,69 @@ export function formatMemory(memory: string | number): string {
   return memory
 }
 
+// Format Kubernetes resource value (CPU or memory) in a human-readable way
+// This handles VPA recommendations which can be in various formats
+export function formatK8sResource(
+  value: string | undefined,
+  type: 'cpu' | 'memory'
+): string {
+  if (!value) return '-'
+
+  if (type === 'cpu') {
+    // CPU can be in cores (1, 0.5) or millicores (100m, 500m)
+    if (value.endsWith('m')) {
+      const milliCores = parseInt(value.slice(0, -1))
+      if (milliCores >= 1000) {
+        return `${(milliCores / 1000).toFixed(1)} cores`
+      }
+      return `${milliCores}m`
+    }
+    // Whole cores or decimal cores
+    const cores = parseFloat(value)
+    if (!isNaN(cores)) {
+      if (cores < 1) {
+        return `${Math.round(cores * 1000)}m`
+      }
+      return `${cores} cores`
+    }
+    return value
+  } else {
+    // Memory formatting
+    const memoryUnits: Record<string, number> = {
+      '': 1,
+      k: 1000,
+      K: 1024,
+      Ki: 1024,
+      M: 1000 * 1000,
+      Mi: 1024 * 1024,
+      G: 1000 * 1000 * 1000,
+      Gi: 1024 * 1024 * 1024,
+      T: 1000 * 1000 * 1000 * 1000,
+      Ti: 1024 * 1024 * 1024 * 1024,
+    }
+
+    // Parse the value
+    const match = value.match(/^(\d+(?:\.\d+)?)\s*([A-Za-z]*)$/)
+    if (!match) return value
+
+    const numValue = parseFloat(match[1])
+    const unit = match[2] || ''
+    const bytes = numValue * (memoryUnits[unit] || 1)
+
+    // Convert to the most appropriate unit
+    if (bytes >= 1024 * 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2)} Ti`
+    } else if (bytes >= 1024 * 1024 * 1024) {
+      return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} Gi`
+    } else if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(0)} Mi`
+    } else if (bytes >= 1024) {
+      return `${(bytes / 1024).toFixed(0)} Ki`
+    }
+    return `${bytes} B`
+  }
+}
+
 export function formatPodMetrics(metric: PodMetrics): {
   cpu: number
   memory: number

@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 
 import { updateResource, useResource } from '@/lib/api'
 import { getOwnerInfo } from '@/lib/k8s'
-import { formatDate, translateError } from '@/lib/utils'
+import { formatDate, formatK8sResource, translateError } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -20,6 +20,8 @@ import { LabelsAnno } from '@/components/lables-anno'
 import { ResourceDeleteConfirmationDialog } from '@/components/resource-delete-confirmation-dialog'
 import { ResourceHistoryTable } from '@/components/resource-history-table'
 import { YamlEditor } from '@/components/yaml-editor'
+import { VPAResourceComparison } from '@/components/vpa-resource-comparison'
+import { VPAMonitoring } from '@/components/vpa-monitoring'
 import {
   VerticalPodAutoscaler,
   ContainerRecommendation,
@@ -42,9 +44,12 @@ import {
 import { Info } from 'lucide-react'
 
 // Helper to format resource values for display
-function formatResource(value: string | undefined): string {
-  if (!value) return '-'
-  return value
+function formatCpu(value: string | undefined): string {
+  return formatK8sResource(value, 'cpu')
+}
+
+function formatMem(value: string | undefined): string {
+  return formatK8sResource(value, 'memory')
 }
 
 // Component to display container recommendations in a readable format
@@ -132,13 +137,13 @@ function ContainerRecommendationsCard({
                       <div className="flex justify-between">
                         <span className="text-sm">CPU:</span>
                         <span className="font-mono text-sm font-medium">
-                          {formatResource(rec.target?.cpu)}
+                          {formatCpu(rec.target?.cpu)}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-sm">Memory:</span>
                         <span className="font-mono text-sm font-medium">
-                          {formatResource(rec.target?.memory)}
+                          {formatMem(rec.target?.memory)}
                         </span>
                       </div>
                     </div>
@@ -152,15 +157,15 @@ function ContainerRecommendationsCard({
                       <div className="flex justify-between text-xs">
                         <span>Lower:</span>
                         <span className="font-mono">
-                          CPU: {formatResource(rec.lowerBound?.cpu)}, Mem:{' '}
-                          {formatResource(rec.lowerBound?.memory)}
+                          CPU: {formatCpu(rec.lowerBound?.cpu)}, Mem:{' '}
+                          {formatMem(rec.lowerBound?.memory)}
                         </span>
                       </div>
                       <div className="flex justify-between text-xs">
                         <span>Upper:</span>
                         <span className="font-mono">
-                          CPU: {formatResource(rec.upperBound?.cpu)}, Mem:{' '}
-                          {formatResource(rec.upperBound?.memory)}
+                          CPU: {formatCpu(rec.upperBound?.cpu)}, Mem:{' '}
+                          {formatMem(rec.upperBound?.memory)}
                         </span>
                       </div>
                     </div>
@@ -170,8 +175,8 @@ function ContainerRecommendationsCard({
                 {rec.uncappedTarget && (
                   <div className="text-xs text-muted-foreground">
                     <span className="font-medium">Uncapped target:</span> CPU:{' '}
-                    {formatResource(rec.uncappedTarget.cpu)}, Memory:{' '}
-                    {formatResource(rec.uncappedTarget.memory)}
+                    {formatCpu(rec.uncappedTarget.cpu)}, Memory:{' '}
+                    {formatMem(rec.uncappedTarget.memory)}
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger className="ml-1">
@@ -195,14 +200,14 @@ function ContainerRecommendationsCard({
                     <span className="font-medium">Policy constraints:</span>
                     {policy.minAllowed && (
                       <span className="ml-2">
-                        Min: CPU {formatResource(policy.minAllowed.cpu)}, Mem{' '}
-                        {formatResource(policy.minAllowed.memory)}
+                        Min: CPU {formatCpu(policy.minAllowed.cpu)}, Mem{' '}
+                        {formatMem(policy.minAllowed.memory)}
                       </span>
                     )}
                     {policy.maxAllowed && (
                       <span className="ml-2">
-                        Max: CPU {formatResource(policy.maxAllowed.cpu)}, Mem{' '}
-                        {formatResource(policy.maxAllowed.memory)}
+                        Max: CPU {formatCpu(policy.maxAllowed.cpu)}, Mem{' '}
+                        {formatMem(policy.maxAllowed.memory)}
                       </span>
                     )}
                   </div>
@@ -543,6 +548,12 @@ export function VPADetail(props: { namespace: string; name: string }) {
                   </CardContent>
                 </Card>
 
+                {/* Resource Comparison - Shows current vs recommended */}
+                <VPAResourceComparison
+                  vpa={vpa}
+                  onRefresh={handleManualRefresh}
+                />
+
                 {/* Recommendations Card */}
                 <ContainerRecommendationsCard
                   recommendations={recommendations}
@@ -566,6 +577,11 @@ export function VPADetail(props: { namespace: string; name: string }) {
                 isSaving={isSavingYaml}
               />
             ),
+          },
+          {
+            value: 'monitoring',
+            label: t('tabs.monitoring', 'Monitoring'),
+            content: <VPAMonitoring vpa={vpa} namespace={namespace} />,
           },
           {
             value: 'events',

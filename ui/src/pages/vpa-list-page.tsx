@@ -2,7 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { Link } from 'react-router-dom'
 
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatK8sResource } from '@/lib/utils'
 import { ResourceTable } from '@/components/resource-table'
 import { VerticalPodAutoscaler } from '@/types/vpa'
 import { Badge } from '@/components/ui/badge'
@@ -19,9 +19,12 @@ function getUpdateMode(vpa: VerticalPodAutoscaler): string {
   return vpa.spec?.updatePolicy?.updateMode || 'Auto'
 }
 
-function formatResourceValue(value: string | undefined): string {
-  if (!value) return '-'
-  return value
+function formatCpu(value: string | undefined): string {
+  return formatK8sResource(value, 'cpu')
+}
+
+function formatMem(value: string | undefined): string {
+  return formatK8sResource(value, 'memory')
 }
 
 function getContainerRecommendations(vpa: VerticalPodAutoscaler) {
@@ -86,7 +89,7 @@ export function VPAListPage() {
                 <div key={rec.containerName} className="text-xs">
                   <span className="font-medium">{rec.containerName}:</span>{' '}
                   <span className="text-muted-foreground">
-                    CPU: {formatResourceValue(rec.target?.cpu)}, Mem: {formatResourceValue(rec.target?.memory)}
+                    CPU: {formatCpu(rec.target?.cpu)}, Mem: {formatMem(rec.target?.memory)}
                   </span>
                 </div>
               ))}

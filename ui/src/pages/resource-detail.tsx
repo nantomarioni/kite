@@ -14,6 +14,7 @@ import { SecretDetail } from './secret-detail'
 import { ServiceDetail } from './service-detail'
 import { SimpleResourceDetail } from './simple-resource-detail'
 import { StatefulSetDetail } from './statefulset-detail'
+import { VPADetail } from './vpa-detail'
 
 function getResourceTypeName(resource: string): string {
   const resourceMap: Record<string, string> = {
@@ -24,6 +25,7 @@ function getResourceTypeName(resource: string): string {
     persistentvolumeclaims: 'PVC',
     persistentvolumes: 'PV',
     horizontalpodautoscalers: 'HPA',
+    verticalpodautoscalers: 'VPA',
   }
   return (
     resourceMap[resource] ||
@@ -72,6 +74,8 @@ export function ResourceDetail() {
       return <NodeDetail name={name} />
     case 'services':
       return <ServiceDetail namespace={namespace!} name={name} />
+    case 'verticalpodautoscalers':
+      return <VPADetail namespace={namespace!} name={name} />
     default:
       return (
         <SimpleResourceDetail

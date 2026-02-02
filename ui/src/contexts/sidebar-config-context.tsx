@@ -10,6 +10,7 @@ import * as React from 'react'
 import {
   Icon,
   IconArrowsHorizontal,
+  IconArrowsUpDown,
   IconBell,
   IconBox,
   IconBoxMultiple,
@@ -72,6 +73,7 @@ const iconMap = {
   IconBell,
   IconCode,
   IconArrowsHorizontal,
+  IconArrowsUpDown,
   IconLayoutDashboard,
 }
 
@@ -168,6 +170,11 @@ const defaultMenus: DefaultMenus = {
       titleKey: 'nav.horizontalpodautoscalers',
       url: '/horizontalpodautoscalers',
       icon: IconArrowsHorizontal,
+    },
+    {
+      titleKey: 'nav.verticalpodautoscalers',
+      url: '/verticalpodautoscalers',
+      icon: IconArrowsUpDown,
     },
   ],
   'sidebar.groups.security': [

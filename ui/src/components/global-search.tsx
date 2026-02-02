@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/auth-context'
 import { useSidebarConfig } from '@/contexts/sidebar-config-context'
 import {
   IconArrowsHorizontal,
+  IconArrowsUpDown,
   IconBox,
   IconBoxMultiple,
   IconLayoutDashboard,
@@ -77,6 +78,10 @@ const RESOURCE_CONFIG: Record<
   horizontalpodautoscalers: {
     label: 'nav.horizontalpodautoscalers',
     icon: IconArrowsHorizontal,
+  },
+  verticalpodautoscalers: {
+    label: 'nav.verticalpodautoscalers',
+    icon: IconArrowsUpDown,
   },
 }
 

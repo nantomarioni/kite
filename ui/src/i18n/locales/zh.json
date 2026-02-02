@@ -84,7 +84,8 @@
     "rolebindings": "角色绑定",
     "clusterroles": "集群角色",
     "clusterrolebindings": "集群角色绑定",
-    "horizontalpodautoscalers": "Pod 水平自动扩缩"
+    "horizontalpodautoscalers": "Pod 水平自动扩缩",
+    "verticalpodautoscalers": "Pod 垂直自动扩缩"
   },
   "sidebar": {
     "groups": {
@@ -604,5 +605,25 @@
     "accessModes": "访问模式",
     "reclaimPolicy": "回收策略",
     "claim": "声明"
+  },
+  "vpa": {
+    "recommendations": "资源建议",
+    "noRecommendations": "暂无建议。VPA 需要时间来分析工作负载模式。",
+    "recommendationsHelp": "VPA 分析实际资源使用情况并推荐最佳值。目标是推荐值，而上下限定义了安全范围。",
+    "targetRecommendation": "目标建议",
+    "bounds": "建议范围",
+    "uncappedHelp": "未封顶目标是 VPA 在没有资源策略中任何最小/最大约束的情况下推荐的值。",
+    "conditions": "条件",
+    "reason": "原因",
+    "lastTransition": "最后转换",
+    "information": "VPA 信息",
+    "targetWorkload": "目标工作负载",
+    "updateMode": "更新模式",
+    "minReplicas": "更新所需最小副本数",
+    "updateModeAutoHelp": "VPA 将在需要时通过驱逐 Pod 自动更新 Pod 资源。",
+    "updateModeOffHelp": "VPA 只提供建议而不应用更改。",
+    "updateModeInitialHelp": "VPA 只在 Pod 创建时设置资源，不更新运行中的 Pod。",
+    "updateModeRecreateHelp": "VPA 将驱逐需要更新的 Pod。",
+    "loading": "正在加载 VPA 详情..."
   }
 }

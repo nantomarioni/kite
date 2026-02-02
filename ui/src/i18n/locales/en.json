@@ -91,7 +91,8 @@
     "rolebindings": "Role Bindings",
     "clusterroles": "Cluster Roles",
     "clusterrolebindings": "Cluster Role Bindings",
-    "horizontalpodautoscalers": "HPA"
+    "horizontalpodautoscalers": "HPA",
+    "verticalpodautoscalers": "VPA"
   },
   "overview": {
     "title": "Overview",
@@ -613,5 +614,25 @@
     "forceDelete": "Force delete (set grace period to 0)",
     "finalizerNote": "If finalizers exist and resource is not deleted after 3 seconds, finalizers will be removed automatically",
     "deleting": "Deleting..."
+  },
+  "vpa": {
+    "recommendations": "Resource Recommendations",
+    "noRecommendations": "No recommendations available yet. VPA needs time to analyze workload patterns.",
+    "recommendationsHelp": "VPA analyzes actual resource usage and recommends optimal values. Target is the recommended value, while lower/upper bounds define the safe range.",
+    "targetRecommendation": "Target Recommendation",
+    "bounds": "Recommended Range",
+    "uncappedHelp": "The uncapped target is what VPA would recommend without any min/max constraints from the resource policy.",
+    "conditions": "Conditions",
+    "reason": "Reason",
+    "lastTransition": "Last Transition",
+    "information": "VPA Information",
+    "targetWorkload": "Target Workload",
+    "updateMode": "Update Mode",
+    "minReplicas": "Min Replicas for Update",
+    "updateModeAutoHelp": "VPA will automatically update pod resources by evicting pods when needed.",
+    "updateModeOffHelp": "VPA will only provide recommendations without applying changes.",
+    "updateModeInitialHelp": "VPA will only set resources on pod creation, not update running pods.",
+    "updateModeRecreateHelp": "VPA will evict pods that need to be updated.",
+    "loading": "Loading VPA details..."
   }
 }

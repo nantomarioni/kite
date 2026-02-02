@@ -23,6 +23,7 @@ import { SecretListPage } from './secret-list-page'
 import { ServiceListPage } from './service-list-page'
 import { SimpleListPage } from './simple-list-page'
 import { StatefulSetListPage } from './statefulset-list-page'
+import { VPAListPage } from './vpa-list-page'
 
 export function ResourceList() {
   const { resource } = useParams()
@@ -70,6 +71,8 @@ export function ResourceList() {
       return <HTTPRouteListPage />
     case 'horizontalpodautoscalers':
       return <HorizontalPodAutoscalerListPage />
+    case 'verticalpodautoscalers':
+      return <VPAListPage />
     case 'events':
       return <EventListPage />
     default:

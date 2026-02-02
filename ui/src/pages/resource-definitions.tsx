@@ -40,6 +40,8 @@ import { ServiceListPage } from './service-list-page'
 import { StatefulSetDetail } from './statefulset-detail'
 import { StatefulSetListPage } from './statefulset-list-page'
 import { StorageClassListPage } from './storageclass-list-page'
+import { VPADetail } from './vpa-detail'
+import { VPAListPage } from './vpa-list-page'
 
 export type ResourceScope = 'cluster' | 'namespace'
 
@@ -158,6 +160,13 @@ function getResourceViews(resourceType: ResourceType): ResourceViewDefinition {
     case 'horizontalpodautoscalers':
       return {
         listPage: () => <HorizontalPodAutoscalerListPage />,
+      }
+    case 'verticalpodautoscalers':
+      return {
+        listPage: () => <VPAListPage />,
+        detailPage: ({ name, namespace }: ResourceDetailProps) => (
+          <VPADetail namespace={namespace!} name={name} />
+        ),
       }
     case 'helmrelease':
       return {

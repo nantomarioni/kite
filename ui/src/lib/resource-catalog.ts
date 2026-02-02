@@ -1,5 +1,6 @@
 import {
   IconArrowsHorizontal,
+  IconArrowsUpDown,
   IconBell,
   IconBox,
   IconBoxMultiple,
@@ -37,6 +38,7 @@ type SidebarGroupKey =
   | 'sidebar.groups.application'
 
 export const resourceIconMap = {
+  IconArrowsUpDown,
   IconLayoutDashboard,
   IconBox,
   IconRocket,
@@ -1023,6 +1025,18 @@ export const resourceCatalog = [
     titleKey: 'nav.horizontalpodautoscalers',
     icon: 'IconArrowsHorizontal',
     sidebar: { groupKey: 'sidebar.groups.config', order: 2 },
+  },
+  {
+    type: 'verticalpodautoscalers',
+    apiGroup: 'autoscaling.k8s.io',
+    singular: 'verticalpodautoscaler',
+    singularLabel: 'VerticalPodAutoscaler',
+    pluralLabel: 'VerticalPodAutoscalers',
+    shortLabel: 'VPA',
+    clusterScope: false,
+    titleKey: 'nav.verticalpodautoscalers',
+    icon: 'IconArrowsUpDown',
+    sidebar: { groupKey: 'sidebar.groups.config', order: 2.5 },
   },
   {
     type: 'poddisruptionbudgets',

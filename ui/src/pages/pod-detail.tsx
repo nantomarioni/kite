@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { ContainerInfoCard } from '@/components/container-info-card'
+import { ContainerStatusTable } from '@/components/container-status-table'
 import { ResourceEditor } from '@/components/editors/resource-editor'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
@@ -191,13 +192,20 @@ export function PodDetail(props: { namespace: string; name: string }) {
             value: 'overview',
             label: t('common.tabs.overview'),
             content: pod ? (
-              <PodOverview
-                pod={pod}
-                namespace={namespace}
-                name={name}
-                events={podEvents}
-                isEventsLoading={isEventsLoading}
-              />
+              <div className="space-y-4">
+                <PodOverview
+                  pod={pod}
+                  namespace={namespace}
+                  name={name}
+                  events={podEvents}
+                  isEventsLoading={isEventsLoading}
+                />
+                {/* Container Status with Restart Information */}
+                <ContainerStatusTable
+                  containerStatuses={pod.status?.containerStatuses}
+                  initContainerStatuses={pod.status?.initContainerStatuses}
+                />
+              </div>
             ) : null,
           },
           {

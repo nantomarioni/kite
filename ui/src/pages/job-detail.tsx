@@ -11,6 +11,7 @@ import {
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { ContainerInfoCard } from '@/components/container-info-card'
+import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { EventTable } from '@/components/event-table'
 import { JobOverview } from '@/components/job-overview'
 import { LogViewer } from '@/components/log-viewer'
@@ -159,10 +160,9 @@ export function JobDetail(props: { namespace: string; name: string }) {
               ) : null}
               <div className="space-y-3">
                 {containers.map((container) => (
-                  <ContainerInfoCard
-                    key={container.name}
-                    container={container}
-                  />
+                  <ContainerInfoCard key={container.name} container={container}>
+                    <ContainerResourceUsage container={container} pods={pods} />
+                  </ContainerInfoCard>
                 ))}
               </div>
             </div>

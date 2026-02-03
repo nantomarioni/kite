@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { ContainerInfoCard } from '@/components/container-info-card'
-import { ContainerStatusTable } from '@/components/container-status-table'
+import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { ResourceEditor } from '@/components/editors/resource-editor'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
@@ -192,20 +192,13 @@ export function PodDetail(props: { namespace: string; name: string }) {
             value: 'overview',
             label: t('common.tabs.overview'),
             content: pod ? (
-              <div className="space-y-4">
-                <PodOverview
-                  pod={pod}
-                  namespace={namespace}
-                  name={name}
-                  events={podEvents}
-                  isEventsLoading={isEventsLoading}
-                />
-                {/* Container Status with Restart Information */}
-                <ContainerStatusTable
-                  containerStatuses={pod.status?.containerStatuses}
-                  initContainerStatuses={pod.status?.initContainerStatuses}
-                />
-              </div>
+              <PodOverview
+                pod={pod}
+                namespace={namespace}
+                name={name}
+                events={podEvents}
+                isEventsLoading={isEventsLoading}
+              />
             ) : null,
           },
           {
@@ -234,7 +227,15 @@ export function PodDetail(props: { namespace: string; name: string }) {
                               (s) => s.name === container.name
                             )}
                             init
-                          />
+                          >
+                            <ContainerResourceUsage
+                              container={container}
+                              status={pod.status?.initContainerStatuses?.find(
+                                (s) => s.name === container.name
+                              )}
+                              pod={pod}
+                            />
+                          </ContainerInfoCard>
                         ))}
                       </CardContent>
                     </Card>
@@ -248,7 +249,15 @@ export function PodDetail(props: { namespace: string; name: string }) {
                         status={pod.status?.containerStatuses?.find(
                           (s) => s.name === container.name
                         )}
-                      />
+                      >
+                        <ContainerResourceUsage
+                          container={container}
+                          status={pod.status?.containerStatuses?.find(
+                            (s) => s.name === container.name
+                          )}
+                          pod={pod}
+                        />
+                      </ContainerInfoCard>
                     ))}
                   </CardContent>
                 </Card>

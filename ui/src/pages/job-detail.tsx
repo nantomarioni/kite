@@ -352,6 +352,7 @@ export function JobDetail(props: { namespace: string; name: string }) {
                           <ContainerTable
                             key={container.name}
                             container={container}
+                            pods={pods}
                           />
                         ))}
                       </div>

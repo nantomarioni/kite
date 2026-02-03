@@ -516,6 +516,7 @@ export function StatefulSetDetail(props: { namespace: string; name: string }) {
                                 handleContainerUpdate(updatedContainer, true)
                               }
                               init
+                              pods={relatedPods}
                             />
                           )
                         )}
@@ -538,6 +539,7 @@ export function StatefulSetDetail(props: { namespace: string; name: string }) {
                               key={container.name}
                               container={container}
                               onContainerUpdate={handleContainerUpdate}
+                              pods={relatedPods}
                             />
                           )
                         )}

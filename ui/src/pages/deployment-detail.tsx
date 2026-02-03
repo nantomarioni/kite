@@ -532,6 +532,7 @@ export function DeploymentDetail(props: { namespace: string; name: string }) {
                                       true
                                     )
                                   }
+                                  pods={relatedPods}
                                 />
                               )
                             )}
@@ -559,6 +560,7 @@ export function DeploymentDetail(props: { namespace: string; name: string }) {
                               onContainerUpdate={(updatedContainer) =>
                                 handleContainerUpdate(updatedContainer)
                               }
+                              pods={relatedPods}
                             />
                           )
                         )}

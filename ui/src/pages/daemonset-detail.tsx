@@ -418,6 +418,7 @@ export function DaemonSetDetail(props: { namespace: string; name: string }) {
                               handleContainerUpdate(updatedContainer, true)
                             }
                             init
+                            pods={relatedPods}
                           />
                         ))}
                       </div>
@@ -440,6 +441,7 @@ export function DaemonSetDetail(props: { namespace: string; name: string }) {
                             onContainerUpdate={(updatedContainer) =>
                               handleContainerUpdate(updatedContainer, false)
                             }
+                            pods={relatedPods}
                           />
                         ))}
                       </div>

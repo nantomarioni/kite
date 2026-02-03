@@ -2,23 +2,165 @@ import { useState } from 'react'
 import { Container } from 'kubernetes-types/core/v1'
 import { ChevronDown, ChevronRight, Edit3 } from 'lucide-react'
 
+import { cn } from '@/lib/utils'
 import { ContainerEditDialog } from './container-edit-dialog'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import { Label } from './ui/label'
+import { Skeleton } from './ui/skeleton'
+
+// Container metrics for current usage
+export interface ContainerMetrics {
+  cpuUsage: number // in cores (e.g., 0.5 = 500m)
+  memoryUsage: number // in MB
+}
+
+// Parse CPU value to millicores
+function parseCPU(value?: string): number {
+  if (!value) return 0
+  if (value.endsWith('m')) {
+    return parseInt(value.slice(0, -1), 10)
+  }
+  if (value.endsWith('n')) {
+    return parseInt(value.slice(0, -1), 10) / 1_000_000
+  }
+  // Plain number is cores, convert to millicores
+  return parseFloat(value) * 1000
+}
+
+// Parse memory value to MB
+function parseMemoryToMB(value?: string): number {
+  if (!value) return 0
+  const num = parseInt(value, 10)
+  if (value.endsWith('Ki')) return num / 1024
+  if (value.endsWith('Mi')) return num
+  if (value.endsWith('Gi')) return num * 1024
+  if (value.endsWith('Ti')) return num * 1024 * 1024
+  if (value.endsWith('K')) return num / 1000
+  if (value.endsWith('M')) return num
+  if (value.endsWith('G')) return num * 1000
+  if (value.endsWith('T')) return num * 1000 * 1000
+  // Assume bytes
+  return num / 1024 / 1024
+}
+
+// Format CPU display
+function formatCPU(millicores: number): string {
+  if (millicores >= 1000) {
+    return `${(millicores / 1000).toFixed(2)} cores`
+  }
+  return `${Math.round(millicores)}m`
+}
+
+// Format memory display
+function formatMemory(mb: number): string {
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(2)} Gi`
+  }
+  return `${Math.round(mb)} Mi`
+}
+
+// Resource usage bar component
+function ResourceUsageBar({
+  label,
+  usage,
+  request,
+  limit,
+  formatValue,
+  isLoading,
+  colorClass,
+}: {
+  label: string
+  usage: number
+  request: number
+  limit: number
+  formatValue: (value: number) => string
+  isLoading?: boolean
+  colorClass: string
+}) {
+  const reference = limit > 0 ? limit : request > 0 ? request : usage
+  const usagePercent = reference > 0 ? Math.min((usage / reference) * 100, 100) : 0
+  const requestPercent = limit > 0 && request > 0 ? (request / limit) * 100 : 0
+
+  const getStatusColor = () => {
+    if (limit > 0) {
+      const usageOfLimit = (usage / limit) * 100
+      if (usageOfLimit >= 90) return 'bg-red-500'
+      if (usageOfLimit >= 70) return 'bg-yellow-500'
+    }
+    if (request > 0) {
+      const usageOfRequest = (usage / request) * 100
+      if (usageOfRequest >= 150) return 'bg-red-500'
+      if (usageOfRequest >= 100) return 'bg-yellow-500'
+    }
+    return colorClass
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        {isLoading ? (
+          <Skeleton className="h-3 w-16" />
+        ) : (
+          <span className="font-mono">
+            {formatValue(usage)}
+            {(request > 0 || limit > 0) && (
+              <span className="text-muted-foreground">
+                {' / '}{limit > 0 ? formatValue(limit) : formatValue(request)}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-1.5 w-full" />
+      ) : (
+        <div className="relative h-1.5 bg-muted rounded-full overflow-hidden">
+          {limit > 0 && request > 0 && request < limit && (
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-blue-500 z-10"
+              style={{ left: `${requestPercent}%` }}
+              title={`Request: ${formatValue(request)}`}
+            />
+          )}
+          <div
+            className={cn('h-full transition-all duration-300 rounded-full', getStatusColor())}
+            style={{ width: `${usagePercent}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function ContainerTable(props: {
   container: Container
   onContainerUpdate?: (updatedContainer: Container) => void
   init?: boolean
+  metrics?: ContainerMetrics
+  metricsLoading?: boolean
 }) {
-  const { container, onContainerUpdate, init } = props
+  const { container, onContainerUpdate, init, metrics, metricsLoading } = props
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
 
   const handleContainerUpdate = (updatedContainer: Container) => {
     onContainerUpdate?.(updatedContainer)
   }
+
+  // Parse resource values
+  const cpuRequest = parseCPU(container.resources?.requests?.cpu as string)
+  const cpuLimit = parseCPU(container.resources?.limits?.cpu as string)
+  const memoryRequest = parseMemoryToMB(container.resources?.requests?.memory as string)
+  const memoryLimit = parseMemoryToMB(container.resources?.limits?.memory as string)
+
+  // Current usage (convert CPU from cores to millicores)
+  const cpuUsage = metrics ? metrics.cpuUsage * 1000 : 0
+  const memoryUsage = metrics ? metrics.memoryUsage : 0
+
+  const hasResources = cpuRequest > 0 || cpuLimit > 0 || memoryRequest > 0 || memoryLimit > 0
+  const hasMetrics = metrics !== undefined
 
   return (
     <>
@@ -120,60 +262,51 @@ export function ContainerTable(props: {
                   Resources
                 </Label>
                 <div className="mt-1 min-h-[24px]">
-                  {container.resources &&
-                  (container.resources.requests ||
-                    container.resources.limits) ? (
-                    <div className="space-y-2">
-                      {container.resources.requests && (
-                        <div>
-                          <div className="text-xs font-medium text-green-600 dark:text-green-400">
-                            Requests
-                          </div>
-                          <div className="text-sm space-y-1">
-                            {container.resources.requests.cpu && (
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">
-                                  CPU:
-                                </span>
-                                <span>{container.resources.requests.cpu}</span>
-                              </div>
-                            )}
-                            {container.resources.requests.memory && (
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">
-                                  Memory:
-                                </span>
-                                <span>
-                                  {container.resources.requests.memory}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                  {hasResources || hasMetrics || metricsLoading ? (
+                    <div className="space-y-3">
+                      {/* CPU Usage Bar */}
+                      {(hasMetrics || metricsLoading || cpuRequest > 0 || cpuLimit > 0) && (
+                        <ResourceUsageBar
+                          label="CPU"
+                          usage={cpuUsage}
+                          request={cpuRequest}
+                          limit={cpuLimit}
+                          formatValue={formatCPU}
+                          isLoading={metricsLoading}
+                          colorClass="bg-blue-500"
+                        />
                       )}
-                      {container.resources.limits && (
-                        <div>
-                          <div className="text-xs font-medium text-red-600 dark:text-red-400">
-                            Limits
-                          </div>
-                          <div className="text-sm space-y-1">
-                            {container.resources.limits.cpu && (
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">
-                                  CPU:
-                                </span>
-                                <span>{container.resources.limits.cpu}</span>
-                              </div>
-                            )}
-                            {container.resources.limits.memory && (
-                              <div className="flex gap-2">
-                                <span className="text-muted-foreground">
-                                  Memory:
-                                </span>
-                                <span>{container.resources.limits.memory}</span>
-                              </div>
-                            )}
-                          </div>
+                      {/* Memory Usage Bar */}
+                      {(hasMetrics || metricsLoading || memoryRequest > 0 || memoryLimit > 0) && (
+                        <ResourceUsageBar
+                          label="Memory"
+                          usage={memoryUsage}
+                          request={memoryRequest}
+                          limit={memoryLimit}
+                          formatValue={formatMemory}
+                          isLoading={metricsLoading}
+                          colorClass="bg-purple-500"
+                        />
+                      )}
+                      {/* Show request/limit details below bars */}
+                      {hasResources && (
+                        <div className="flex gap-4 text-xs text-muted-foreground pt-1 border-t border-dashed">
+                          {(cpuRequest > 0 || memoryRequest > 0) && (
+                            <div>
+                              <span className="text-green-600 dark:text-green-400 font-medium">Req: </span>
+                              {cpuRequest > 0 && <span>CPU {container.resources?.requests?.cpu}</span>}
+                              {cpuRequest > 0 && memoryRequest > 0 && <span>, </span>}
+                              {memoryRequest > 0 && <span>Mem {container.resources?.requests?.memory}</span>}
+                            </div>
+                          )}
+                          {(cpuLimit > 0 || memoryLimit > 0) && (
+                            <div>
+                              <span className="text-red-600 dark:text-red-400 font-medium">Lim: </span>
+                              {cpuLimit > 0 && <span>CPU {container.resources?.limits?.cpu}</span>}
+                              {cpuLimit > 0 && memoryLimit > 0 && <span>, </span>}
+                              {memoryLimit > 0 && <span>Mem {container.resources?.limits?.memory}</span>}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

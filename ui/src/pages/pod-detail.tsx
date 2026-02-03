@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 
-import { updateResource, useResource } from '@/lib/api'
+import { updateResource, usePodMetrics, useResource } from '@/lib/api'
 import { getOwnerInfo, getPodErrorMessage, getPodStatus } from '@/lib/k8s'
 import { withSubPath } from '@/lib/subpath'
 import { formatDate, translateError } from '@/lib/utils'
@@ -21,7 +21,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { ResponsiveTabs } from '@/components/ui/responsive-tabs'
 import { ContainerStatusTable } from '@/components/container-status-table'
-import { ContainerTable } from '@/components/container-table'
+import {
+  ContainerMetrics,
+  ContainerTable,
+} from '@/components/container-table'
 import { DescribeDialog } from '@/components/describe-dialog'
 import { ErrorMessage } from '@/components/error-message'
 import { EventTable } from '@/components/event-table'
@@ -86,6 +89,35 @@ export function PodDetail(props: { namespace: string; name: string }) {
   const podStatus = useMemo(() => {
     return getPodStatus(pod)
   }, [pod])
+
+  // Fetch metrics for the pod (aggregated across all containers)
+  const { data: podMetrics, isLoading: metricsLoading } = usePodMetrics(
+    namespace,
+    name,
+    '30m',
+    {
+      refreshInterval: 15000, // Refresh every 15 seconds
+    }
+  )
+
+  // Calculate metrics per container by dividing evenly (approximation when not filtering by container)
+  // This is a simplification - for exact per-container metrics, we'd need separate API calls
+  const getContainerMetrics = useMemo(() => {
+    if (!podMetrics) return () => undefined
+
+    // Get latest values
+    const latestCPU = podMetrics.cpu?.length > 0 ? podMetrics.cpu[podMetrics.cpu.length - 1].value : 0
+    const latestMemory = podMetrics.memory?.length > 0 ? podMetrics.memory[podMetrics.memory.length - 1].value : 0
+
+    // Return aggregated pod metrics
+    // For multi-container pods, this shows total pod usage vs each container's limits
+    return (_containerName: string): ContainerMetrics | undefined => {
+      return {
+        cpuUsage: latestCPU,  // in cores
+        memoryUsage: latestMemory,  // in MB
+      }
+    }
+  }, [podMetrics])
 
   if (isLoading) {
     return (
@@ -212,6 +244,7 @@ export function PodDetail(props: { namespace: string; name: string }) {
                     </div>
                   </CardContent>
                 </Card>
+
                 {/* Pod Info */}
                 <Card>
                   <CardHeader>
@@ -337,6 +370,8 @@ export function PodDetail(props: { namespace: string; name: string }) {
                                 key={container.name}
                                 container={container}
                                 init
+                                metrics={getContainerMetrics(container.name)}
+                                metricsLoading={metricsLoading}
                               />
                             ))}
                           </div>
@@ -357,6 +392,8 @@ export function PodDetail(props: { namespace: string; name: string }) {
                           <ContainerTable
                             key={container.name}
                             container={container}
+                            metrics={getContainerMetrics(container.name)}
+                            metricsLoading={metricsLoading}
                           />
                         ))}
                       </div>

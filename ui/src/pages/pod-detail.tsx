@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { ResponsiveTabs } from '@/components/ui/responsive-tabs'
+import { ContainerStatusTable } from '@/components/container-status-table'
 import { ContainerTable } from '@/components/container-table'
 import { DescribeDialog } from '@/components/describe-dialog'
 import { ErrorMessage } from '@/components/error-message'
@@ -395,6 +396,12 @@ export function PodDetail(props: { namespace: string; name: string }) {
                     </CardContent>
                   </Card>
                 )}
+
+                {/* Container Status with Restart Information */}
+                <ContainerStatusTable
+                  containerStatuses={pod.status?.containerStatuses}
+                  initContainerStatuses={pod.status?.initContainerStatuses}
+                />
               </div>
             ),
           },

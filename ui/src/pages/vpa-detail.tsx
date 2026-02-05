@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 
 import { updateResource, useResource } from '@/lib/api'
 import { getOwnerInfo } from '@/lib/k8s'
-import { formatDate, formatK8sResource, translateError } from '@/lib/utils'
+import { formatDate, translateError } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -22,11 +22,7 @@ import { ResourceHistoryTable } from '@/components/resource-history-table'
 import { YamlEditor } from '@/components/yaml-editor'
 import { VPAResourceComparison } from '@/components/vpa-resource-comparison'
 import { VPAMonitoring } from '@/components/vpa-monitoring'
-import {
-  VerticalPodAutoscaler,
-  ContainerRecommendation,
-  ContainerResourcePolicy,
-} from '@/types/vpa'
+import { VerticalPodAutoscaler } from '@/types/vpa'
 import {
   Table,
   TableBody,
@@ -42,184 +38,6 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Info } from 'lucide-react'
-
-// Helper to format resource values for display
-function formatCpu(value: string | undefined): string {
-  return formatK8sResource(value, 'cpu')
-}
-
-function formatMem(value: string | undefined): string {
-  return formatK8sResource(value, 'memory')
-}
-
-// Component to display container recommendations in a readable format
-function ContainerRecommendationsCard({
-  recommendations,
-  containerPolicies,
-}: {
-  recommendations: ContainerRecommendation[]
-  containerPolicies?: ContainerResourcePolicy[]
-}) {
-  const { t } = useTranslation()
-
-  if (!recommendations || recommendations.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {t('vpa.recommendations', 'Resource Recommendations')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">
-            {t(
-              'vpa.noRecommendations',
-              'No recommendations available yet. VPA needs time to analyze workload patterns.'
-            )}
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const getContainerPolicy = (containerName: string) => {
-    return containerPolicies?.find(
-      (p) => p.containerName === containerName || p.containerName === '*'
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          {t('vpa.recommendations', 'Resource Recommendations')}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger>
-                <Info className="w-4 h-4 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent className="max-w-sm">
-                <p className="text-xs">
-                  {t(
-                    'vpa.recommendationsHelp',
-                    'VPA analyzes actual resource usage and recommends optimal values. Target is the recommended value, while lower/upper bounds define the safe range.'
-                  )}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {recommendations.map((rec) => {
-            const policy = getContainerPolicy(rec.containerName || '')
-            return (
-              <div
-                key={rec.containerName}
-                className="border rounded-lg p-4 space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-medium">{rec.containerName}</h4>
-                  {policy?.mode && (
-                    <Badge variant={policy.mode === 'Off' ? 'secondary' : 'default'}>
-                      {policy.mode}
-                    </Badge>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <h5 className="text-sm font-medium text-muted-foreground">
-                      {t('vpa.targetRecommendation', 'Target Recommendation')}
-                    </h5>
-                    <div className="bg-muted/50 rounded-md p-3 space-y-1">
-                      <div className="flex justify-between">
-                        <span className="text-sm">CPU:</span>
-                        <span className="font-mono text-sm font-medium">
-                          {formatCpu(rec.target?.cpu)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm">Memory:</span>
-                        <span className="font-mono text-sm font-medium">
-                          {formatMem(rec.target?.memory)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h5 className="text-sm font-medium text-muted-foreground">
-                      {t('vpa.bounds', 'Recommended Range')}
-                    </h5>
-                    <div className="bg-muted/50 rounded-md p-3 space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Lower:</span>
-                        <span className="font-mono">
-                          CPU: {formatCpu(rec.lowerBound?.cpu)}, Mem:{' '}
-                          {formatMem(rec.lowerBound?.memory)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span>Upper:</span>
-                        <span className="font-mono">
-                          CPU: {formatCpu(rec.upperBound?.cpu)}, Mem:{' '}
-                          {formatMem(rec.upperBound?.memory)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {rec.uncappedTarget && (
-                  <div className="text-xs text-muted-foreground">
-                    <span className="font-medium">Uncapped target:</span> CPU:{' '}
-                    {formatCpu(rec.uncappedTarget.cpu)}, Memory:{' '}
-                    {formatMem(rec.uncappedTarget.memory)}
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger className="ml-1">
-                          <Info className="w-3 h-3 inline" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-xs max-w-xs">
-                            {t(
-                              'vpa.uncappedHelp',
-                              'The uncapped target is what VPA would recommend without any min/max constraints from the resource policy.'
-                            )}
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                )}
-
-                {policy && (policy.minAllowed || policy.maxAllowed) && (
-                  <div className="text-xs text-muted-foreground border-t pt-2 mt-2">
-                    <span className="font-medium">Policy constraints:</span>
-                    {policy.minAllowed && (
-                      <span className="ml-2">
-                        Min: CPU {formatCpu(policy.minAllowed.cpu)}, Mem{' '}
-                        {formatMem(policy.minAllowed.memory)}
-                      </span>
-                    )}
-                    {policy.maxAllowed && (
-                      <span className="ml-2">
-                        Max: CPU {formatCpu(policy.maxAllowed.cpu)}, Mem{' '}
-                        {formatMem(policy.maxAllowed.memory)}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
 
 // Component to show VPA conditions/status
 function VPAConditionsCard({
@@ -370,10 +188,7 @@ export function VPADetail(props: { namespace: string; name: string }) {
 
   const targetRef = vpa.spec?.targetRef
   const updateMode = vpa.spec?.updatePolicy?.updateMode || 'Auto'
-  const recommendations =
-    vpa.status?.recommendation?.containerRecommendations || []
   const conditions = vpa.status?.conditions || []
-  const containerPolicies = vpa.spec?.resourcePolicy?.containerPolicies
 
   return (
     <div className="space-y-2">
@@ -487,6 +302,11 @@ export function VPADetail(props: { namespace: string; name: string }) {
                                       'vpa.updateModeRecreateHelp',
                                       'VPA will evict pods that need to be updated.'
                                     )}
+                                  {updateMode === 'InPlaceOrRecreate' &&
+                                    t(
+                                      'vpa.updateModeInPlaceOrRecreateHelp',
+                                      'VPA will attempt in-place resource updates. If not possible, pods will be evicted and recreated.'
+                                    )}
                                 </p>
                               </TooltipContent>
                             </Tooltip>
@@ -552,12 +372,6 @@ export function VPADetail(props: { namespace: string; name: string }) {
                 <VPAResourceComparison
                   vpa={vpa}
                   onRefresh={handleManualRefresh}
-                />
-
-                {/* Recommendations Card */}
-                <ContainerRecommendationsCard
-                  recommendations={recommendations}
-                  containerPolicies={containerPolicies}
                 />
 
                 {/* Conditions Card */}

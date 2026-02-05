@@ -1,20 +1,17 @@
 import { useMemo, useState } from 'react'
 import {
-  IconAlertTriangle,
   IconArrowDown,
   IconArrowUp,
   IconCheck,
   IconMinus,
-  IconPlayerPlay,
   IconRefresh,
-  IconSettings,
 } from '@tabler/icons-react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Container } from 'kubernetes-types/core/v1'
+import { Container, Pod } from 'kubernetes-types/core/v1'
 
-import { patchResource, useResource } from '@/lib/api'
+import { patchResource, useResource, useResources } from '@/lib/api'
 import { formatK8sResource, translateError } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -149,129 +146,6 @@ function getDiffIndicator(diff: number | null): {
   }
 }
 
-// Component to show the update mode behavior clearly
-function UpdateModeBehavior({ vpa }: { vpa: VerticalPodAutoscaler }) {
-  const { t } = useTranslation()
-  const updateMode = vpa.spec?.updatePolicy?.updateMode || 'Auto'
-
-  const modeInfo = useMemo(() => {
-    switch (updateMode) {
-      case 'Auto':
-        return {
-          icon: <Zap className="w-5 h-5 text-yellow-500" />,
-          title: t('vpa.updateModeAuto', 'Auto (Pod Eviction)'),
-          description: t(
-            'vpa.updateModeAutoDescription',
-            'VPA will automatically evict pods to apply resource changes. Pods will be recreated with new resource values.'
-          ),
-          willRecreate: true,
-          isActive: true,
-        }
-      case 'Recreate':
-        return {
-          icon: <IconRefresh className="w-5 h-5 text-orange-500" />,
-          title: t('vpa.updateModeRecreate', 'Recreate (Pod Eviction)'),
-          description: t(
-            'vpa.updateModeRecreateDescription',
-            'VPA will evict pods when resource changes are needed. Same behavior as Auto mode.'
-          ),
-          willRecreate: true,
-          isActive: true,
-        }
-      case 'Initial':
-        return {
-          icon: <IconPlayerPlay className="w-5 h-5 text-blue-500" />,
-          title: t('vpa.updateModeInitial', 'Initial Only'),
-          description: t(
-            'vpa.updateModeInitialDescription',
-            'VPA only assigns resources when pods are created. Running pods will NOT be modified.'
-          ),
-          willRecreate: false,
-          isActive: true,
-        }
-      case 'Off':
-        return {
-          icon: <IconSettings className="w-5 h-5 text-gray-500" />,
-          title: t('vpa.updateModeOff', 'Off (Recommendations Only)'),
-          description: t(
-            'vpa.updateModeOffDescription',
-            'VPA provides recommendations but does NOT apply any changes. Manual intervention required.'
-          ),
-          willRecreate: false,
-          isActive: false,
-        }
-      default:
-        return {
-          icon: <IconAlertTriangle className="w-5 h-5 text-gray-500" />,
-          title: updateMode,
-          description: t('vpa.updateModeUnknown', 'Unknown update mode'),
-          willRecreate: false,
-          isActive: false,
-        }
-    }
-  }, [updateMode, t])
-
-  return (
-    <Alert
-      variant={modeInfo.isActive ? 'default' : 'destructive'}
-      className={
-        modeInfo.isActive ? 'border-blue-200 bg-blue-50 dark:bg-blue-950/20' : ''
-      }
-    >
-      <div className="flex items-start gap-3">
-        {modeInfo.icon}
-        <div className="flex-1">
-          <AlertTitle className="text-sm font-semibold">
-            {modeInfo.title}
-          </AlertTitle>
-          <AlertDescription className="text-xs mt-1">
-            {modeInfo.description}
-          </AlertDescription>
-          <div className="flex gap-2 mt-2">
-            {modeInfo.willRecreate ? (
-              <Badge variant="outline" className="text-xs">
-                <IconRefresh className="w-3 h-3 mr-1" />
-                {t('vpa.willRecreatePods', 'Will recreate pods')}
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="text-xs">
-                {t('vpa.noAutomaticChanges', 'No automatic changes')}
-              </Badge>
-            )}
-            {!modeInfo.isActive && (
-              <Badge variant="destructive" className="text-xs">
-                {t('vpa.manualActionRequired', 'Manual action required')}
-              </Badge>
-            )}
-          </div>
-        </div>
-      </div>
-    </Alert>
-  )
-}
-
-// Note about in-place updates
-function InPlaceUpdateNote() {
-  const { t } = useTranslation()
-
-  return (
-    <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-3 flex items-start gap-2">
-      <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-      <div>
-        <p className="font-medium">
-          {t('vpa.inPlaceNote', 'About In-Place Pod Vertical Scaling')}
-        </p>
-        <p className="mt-1">
-          {t(
-            'vpa.inPlaceNoteDescription',
-            'In-Place Pod Vertical Scaling (Kubernetes 1.27+ beta feature) allows resource changes without pod restart. However, standard VPA does not support this yet and always recreates pods. The InPlacePodVerticalScaling feature gate must be enabled on your cluster for in-place updates.'
-          )}
-        </p>
-      </div>
-    </div>
-  )
-}
-
 export function VPAResourceComparison({
   vpa,
   onRefresh,
@@ -305,10 +179,31 @@ export function VPAResourceComparison({
     error: workloadError,
     refetch: refetchWorkload,
   } = useResource(resourceType as any, targetRef?.name || '', namespace, {
-    staleTime: 5000,
+    staleTime: 0,
   })
 
-  // Get containers from workload
+  // Get label selector from workload to fetch pods
+  const labelSelector = useMemo(() => {
+    if (!workload) return undefined
+    const spec = (workload as any)?.spec
+    if (!spec?.selector?.matchLabels) return undefined
+    return Object.entries(spec.selector.matchLabels as Record<string, string>)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(',')
+  }, [workload])
+
+  // Fetch pods for the workload to get actual running container resources
+  const { data: pods, isLoading: isLoadingPods } = useResources(
+    'pods',
+    namespace,
+    {
+      labelSelector,
+      disable: !labelSelector,
+      staleTime: 0,
+    }
+  )
+
+  // Get containers from workload (for spec/configured values)
   const workloadContainers = useMemo((): Container[] => {
     if (!workload) return []
 
@@ -320,6 +215,30 @@ export function VPAResourceComparison({
     const templateSpec = spec.template?.spec || spec.jobTemplate?.spec?.template?.spec
     return templateSpec?.containers || []
   }, [workload])
+
+  // Get actual container resources from running pods
+  // During rolling updates, pods may have different resources (old vs new pods)
+  // We use the newest running pod as it will have the latest VPA-applied resources
+  const actualPodContainers = useMemo((): Container[] => {
+    if (!pods || pods.length === 0) return []
+    
+    // Filter to running pods only
+    const runningPods = pods.filter((p: Pod) => p.status?.phase === 'Running')
+    
+    if (runningPods.length === 0) {
+      // Fall back to any pod if none are running
+      return pods[0]?.spec?.containers || []
+    }
+    
+    // Sort by creation time (newest first) to get the pod with latest VPA-applied resources
+    const sortedPods = [...runningPods].sort((a: Pod, b: Pod) => {
+      const aTime = new Date(a.metadata?.creationTimestamp || 0).getTime()
+      const bTime = new Date(b.metadata?.creationTimestamp || 0).getTime()
+      return bTime - aTime // Descending order (newest first)
+    })
+    
+    return sortedPods[0]?.spec?.containers || []
+  }, [pods])
 
   // Get recommendations from VPA
   const recommendations = vpa.status?.recommendation?.containerRecommendations || []
@@ -335,14 +254,19 @@ export function VPAResourceComparison({
         (p) => p.containerName === container.name || p.containerName === '*'
       )
 
-      const currentCpuRequests = parseResourceValue(
-        container.resources?.requests?.cpu,
-        'cpu'
+      // Get actual resources from running pod (if available)
+      const actualContainer = actualPodContainers.find(
+        (c) => c.name === container.name
       )
-      const currentMemRequests = parseResourceValue(
-        container.resources?.requests?.memory,
-        'memory'
-      )
+      
+      // Use actual pod resources if available, fall back to workload spec
+      const currentCpu = actualContainer?.resources?.requests?.cpu || container.resources?.requests?.cpu
+      const currentMemory = actualContainer?.resources?.requests?.memory || container.resources?.requests?.memory
+      const currentLimitCpu = actualContainer?.resources?.limits?.cpu || container.resources?.limits?.cpu
+      const currentLimitMemory = actualContainer?.resources?.limits?.memory || container.resources?.limits?.memory
+
+      const currentCpuRequests = parseResourceValue(currentCpu, 'cpu')
+      const currentMemRequests = parseResourceValue(currentMemory, 'memory')
       const recommendedCpu = parseResourceValue(recommendation?.target?.cpu, 'cpu')
       const recommendedMem = parseResourceValue(
         recommendation?.target?.memory,
@@ -365,6 +289,17 @@ export function VPAResourceComparison({
         containerName: container.name,
         current: {
           requests: {
+            cpu: currentCpu,
+            memory: currentMemory,
+          },
+          limits: {
+            cpu: currentLimitCpu,
+            memory: currentLimitMemory,
+          },
+        },
+        // Also keep configured values for the Apply dialog (we patch the workload spec)
+        configured: {
+          requests: {
             cpu: container.resources?.requests?.cpu,
             memory: container.resources?.requests?.memory,
           },
@@ -378,6 +313,7 @@ export function VPAResourceComparison({
               target: recommendation.target || {},
               lowerBound: recommendation.lowerBound || {},
               upperBound: recommendation.upperBound || {},
+              uncappedTarget: recommendation.uncappedTarget || {},
             }
           : null,
         policy,
@@ -387,7 +323,31 @@ export function VPAResourceComparison({
         memDiff,
       }
     })
-  }, [workloadContainers, recommendations, containerPolicies])
+  }, [workloadContainers, actualPodContainers, recommendations, containerPolicies])
+
+  // Helper to clamp a recommendation to existing limits
+  const clampToLimit = (
+    recommendedValue: string | undefined,
+    limitValue: string | undefined,
+    type: 'cpu' | 'memory'
+  ): string | undefined => {
+    if (!recommendedValue) return undefined
+    if (!limitValue) return recommendedValue
+
+    const recommendedParsed = parseResourceValue(recommendedValue, type)
+    const limitParsed = parseResourceValue(limitValue, type)
+
+    if (recommendedParsed === null || limitParsed === null) {
+      return recommendedValue
+    }
+
+    // If recommended exceeds limit, use the limit value instead
+    if (recommendedParsed > limitParsed) {
+      return limitValue
+    }
+
+    return recommendedValue
+  }
 
   // Handle applying recommendations
   const handleApplyRecommendations = async () => {
@@ -404,31 +364,41 @@ export function VPAResourceComparison({
             (selectedContainers.length === 0 ||
               selectedContainers.includes(c.containerName))
         )
-        .map((c) => ({
-          name: c.containerName,
-          resources: {
-            requests: {
-              ...(c.recommended?.target?.cpu && {
-                cpu: c.recommended.target.cpu,
-              }),
-              ...(c.recommended?.target?.memory && {
-                memory: c.recommended.target.memory,
-              }),
+        .map((c) => {
+          // Clamp CPU and memory recommendations to not exceed configured limits (from workload spec)
+          const cpuRequest = clampToLimit(
+            c.recommended?.target?.cpu,
+            c.configured.limits?.cpu,
+            'cpu'
+          )
+          const memoryRequest = clampToLimit(
+            c.recommended?.target?.memory,
+            c.configured.limits?.memory,
+            'memory'
+          )
+
+          return {
+            name: c.containerName,
+            resources: {
+              requests: {
+                ...(cpuRequest && { cpu: cpuRequest }),
+                ...(memoryRequest && { memory: memoryRequest }),
+              },
+              // Optionally update limits based on controlledValues policy
+              ...(c.policy?.controlledValues === 'RequestsAndLimits' &&
+                c.configured.limits && {
+                  limits: {
+                    ...(c.recommended?.target?.cpu && {
+                      cpu: c.recommended.target.cpu,
+                    }),
+                    ...(c.recommended?.target?.memory && {
+                      memory: c.recommended.target.memory,
+                    }),
+                  },
+                }),
             },
-            // Optionally update limits based on controlledValues policy
-            ...(c.policy?.controlledValues === 'RequestsAndLimits' &&
-              c.current.limits && {
-                limits: {
-                  ...(c.recommended?.target?.cpu && {
-                    cpu: c.recommended.target.cpu,
-                  }),
-                  ...(c.recommended?.target?.memory && {
-                    memory: c.recommended.target.memory,
-                  }),
-                },
-              }),
-          },
-        }))
+          }
+        })
 
       if (containerPatches.length === 0) {
         toast.error(t('vpa.noContainersToUpdate', 'No containers to update'))
@@ -504,19 +474,6 @@ export function VPAResourceComparison({
 
   return (
     <div className="space-y-4">
-      {/* Update Mode Behavior Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            {t('vpa.updateBehavior', 'Update Behavior')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <UpdateModeBehavior vpa={vpa} />
-          <InPlaceUpdateNote />
-        </CardContent>
-      </Card>
-
       {/* Resource Comparison Card */}
       <Card>
         <CardHeader>
@@ -566,7 +523,7 @@ export function VPAResourceComparison({
           </div>
         </CardHeader>
         <CardContent>
-          {isLoadingWorkload ? (
+          {isLoadingWorkload || isLoadingPods ? (
             <div className="flex items-center justify-center py-4">
               <IconRefresh className="w-4 h-4 animate-spin mr-2" />
               {t('vpa.loadingWorkload', 'Loading workload...')}
@@ -751,6 +708,104 @@ export function VPAResourceComparison({
                   </span>
                 </div>
               </div>
+
+              {/* Policy Constraints & Uncapped Targets */}
+              {comparisonData.some(
+                (c) =>
+                  c.policy?.minAllowed ||
+                  c.policy?.maxAllowed ||
+                  (c.recommended?.uncappedTarget &&
+                    (c.recommended.uncappedTarget.cpu !== c.recommended.target?.cpu ||
+                      c.recommended.uncappedTarget.memory !== c.recommended.target?.memory))
+              ) && (
+                <div className="mt-4 pt-4 border-t space-y-3">
+                  <h4 className="text-sm font-medium flex items-center gap-2">
+                    {t('vpa.policyDetails', 'Policy Details')}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Info className="w-3 h-3 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p className="text-xs">
+                            {t(
+                              'vpa.policyDetailsHelp',
+                              'Shows VPA resource policy constraints and uncapped recommendations. Uncapped target is what VPA would recommend without min/max constraints.'
+                            )}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </h4>
+                  <div className="grid gap-2">
+                    {comparisonData
+                      .filter(
+                        (c) =>
+                          c.policy?.minAllowed ||
+                          c.policy?.maxAllowed ||
+                          (c.recommended?.uncappedTarget &&
+                            (c.recommended.uncappedTarget.cpu !== c.recommended.target?.cpu ||
+                              c.recommended.uncappedTarget.memory !== c.recommended.target?.memory))
+                      )
+                      .map((c) => (
+                        <div
+                          key={c.containerName}
+                          className="bg-muted/50 rounded-md p-3 text-xs space-y-1"
+                        >
+                          <div className="font-medium">{c.containerName}</div>
+                          {(c.policy?.minAllowed || c.policy?.maxAllowed) && (
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                              {c.policy?.minAllowed && (
+                                <span>
+                                  {t('vpa.minAllowed', 'Min allowed')}:{' '}
+                                  <span className="font-mono">
+                                    CPU {formatCpu(c.policy.minAllowed.cpu)}, Mem{' '}
+                                    {formatMem(c.policy.minAllowed.memory)}
+                                  </span>
+                                </span>
+                              )}
+                              {c.policy?.maxAllowed && (
+                                <span>
+                                  {t('vpa.maxAllowed', 'Max allowed')}:{' '}
+                                  <span className="font-mono">
+                                    CPU {formatCpu(c.policy.maxAllowed.cpu)}, Mem{' '}
+                                    {formatMem(c.policy.maxAllowed.memory)}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {c.recommended?.uncappedTarget &&
+                            (c.recommended.uncappedTarget.cpu !== c.recommended.target?.cpu ||
+                              c.recommended.uncappedTarget.memory !== c.recommended.target?.memory) && (
+                              <div className="text-muted-foreground">
+                                {t('vpa.uncappedTarget', 'Uncapped recommendation')}:{' '}
+                                <span className="font-mono">
+                                  CPU {formatCpu(c.recommended.uncappedTarget.cpu)}, Mem{' '}
+                                  {formatMem(c.recommended.uncappedTarget.memory)}
+                                </span>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger className="ml-1">
+                                      <Info className="w-3 h-3 inline" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p className="text-xs max-w-xs">
+                                        {t(
+                                          'vpa.uncappedHelp',
+                                          'What VPA would recommend without policy min/max constraints. The actual target is capped to stay within policy limits.'
+                                        )}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              </div>
+                            )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -777,13 +832,18 @@ export function VPAResourceComparison({
 
           <div className="space-y-4 py-4">
             <Alert>
-              <IconAlertTriangle className="h-4 w-4" />
-              <AlertTitle>{t('common.warning', 'Warning')}</AlertTitle>
+              <Info className="h-4 w-4" />
+              <AlertTitle>{t('common.note', 'Note')}</AlertTitle>
               <AlertDescription>
-                {t(
-                  'vpa.applyWarning',
-                  'Applying recommendations will trigger a rolling update. Existing pods will be evicted and recreated with new resource values.'
-                )}
+                {updateMode === 'InPlaceOrRecreate'
+                  ? t(
+                      'vpa.applyWarningInPlace',
+                      'If your cluster supports In-Place Pod Vertical Scaling (Kubernetes 1.27+), resources may be updated without pod restart. Otherwise, a rolling update will occur.'
+                    )
+                  : t(
+                      'vpa.applyWarning',
+                      'Applying recommendations will trigger a rolling update. Existing pods will be recreated with new resource values.'
+                    )}
               </AlertDescription>
             </Alert>
 

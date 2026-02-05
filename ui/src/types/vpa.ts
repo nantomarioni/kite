@@ -32,7 +32,7 @@ export interface VPASpec {
     name?: string
   }
   updatePolicy?: {
-    updateMode?: 'Off' | 'Initial' | 'Recreate' | 'Auto'
+    updateMode?: 'Off' | 'Initial' | 'Recreate' | 'Auto' | 'InPlaceOrRecreate'
     minReplicas?: number
     // evictionRequirements for VPA v1beta2+ (optional)
     evictionRequirements?: Array<{

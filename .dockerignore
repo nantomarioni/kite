@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# GitHub
+.github
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Helm charts
+charts/
+
+# Kubernetes manifests
+deploy/
+
+# Development files
+.golangci.yml
+.prettierignore
+Makefile
+dev.db
+
+# Scripts
+scripts/
+
+# Built binaries
+kite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (handled in multi-stage build)
+ui/node_modules/
+ui/dist/
+
+# Test files
+*_test.go
+**/*_test.go

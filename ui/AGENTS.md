@@ -1,34 +1,22 @@
 # Agent guide — kite frontend (`ui/`)
 
-The React SPA for kite. Built with Vite to `../static/`, then **embedded into the
-Go binary** — it is not deployed separately. Read the root `AGENTS.md` first for
-the big picture, fork status, and the cross-stack feature chain.
-
-## Stack
-
-- **React 19 + TypeScript 5**, **Vite 7** (`vite.config.ts`).
-- **pnpm** is the package manager (`pnpm-lock.yaml`). `cd ui` before running it.
-- **TanStack Query** (`@tanstack/react-query`) for all server state + caching.
-- **TanStack Table** for data tables; **Tailwind CSS v4** + **Radix UI** +
-  shadcn-style components (`components.json`, "new-york", base `neutral`) for UI.
-- **Monaco editor** for YAML editing; **xterm.js** for terminals; **recharts** for
-  metrics; **react-router-dom v7** for routing; **i18next** for en/zh.
+The React SPA, built by Vite to `../static/` and **embedded in the Go binary**
+(not deployed separately). Root `AGENTS.md` has the big picture + fork status.
+Stack: React 19 + TS 5, Vite 7, pnpm, TanStack Query/Table, Tailwind v4 + Radix
++ shadcn (`components.json`, "new-york"), Monaco, xterm.js, recharts,
+react-router-dom v7, i18next (en/zh).
 
 ## Commands (`cd ui`)
 
 ```bash
 pnpm install
-pnpm run dev          # Vite dev server (proxies /api → http://localhost:8080, see vite.config.ts)
+pnpm run dev          # Vite dev server (proxies /api → :8080)
 pnpm run build        # tsc -b && vite build → ../static
-pnpm run lint         # eslint .   (eslint.config.js, typescript-eslint + react-hooks)
-pnpm run type-check   # tsc --noEmit
-pnpm run format       # prettier --write .
+pnpm run lint | type-check | format   # eslint . | tsc --noEmit | prettier --write .
 ```
 
-Quality gate (no unit test runner exists here): **`pnpm run type-check` +
-`pnpm run lint` must be clean**, and `vite build` must succeed (covered by
-`make build` at repo root). Usually run together with the backend via
-`make dev` from the repo root.
+Gate (no unit test runner): **`type-check` + `lint` clean** and `vite build`
+succeeds (root `make build`).
 
 ## Layout
 
@@ -51,10 +39,9 @@ ui/src/
 
 ## The data layer (do this, not raw fetch)
 
-All server access goes through **`src/lib/api.ts`**, which wraps
-`apiClient` (`api-client.ts` — handles the auth cookie, 401 refresh, and the
-`x-cluster-name` header) and exposes TanStack Query hooks. Don't call `fetch`
-directly from a component.
+All server access goes through **`src/lib/api.ts`** (wraps `apiClient` —
+auth cookie, 401 refresh, `x-cluster-name`) as TanStack Query hooks. Never
+`fetch` from a component.
 
 - **Generic resource access** is keyed off the resource string and typed via the
   maps in `src/types/api.ts`:
@@ -66,11 +53,10 @@ directly from a component.
     `useResourceHistory`, `useDescribe`, `useRelatedResources`.
   - Streams: `useLogsStream` / `useLogsWebSocket` (logs), terminals via xterm +
     `useWebSocket`.
-- **The type contract** is hand-mirrored from the Go response shapes — there is
-  **no codegen**. To add a resource type, extend `ResourceType`,
-  `ResourcesTypeMap` (list shape), and `ResourceTypeMap` (single shape) in
-  `src/types/api.ts`; reuse `kubernetes-types` for k8s objects. A backend
-  response-shape change requires a matching hand-edit here.
+- **The type contract** is hand-mirrored from Go (**no codegen**): extend
+  `ResourceType`, `ResourcesTypeMap` (list), `ResourceTypeMap` (single) in
+  `src/types/api.ts`; reuse `kubernetes-types`. A backend shape change needs a
+  matching hand-edit here.
 
 ## Adding a view
 
@@ -84,12 +70,10 @@ directly from a component.
 4. **i18n** — add keys to **both** `i18n/locales/en.json` and `zh.json` (keep the
    trees parallel).
 
-**CRD views need no backend change** — they fetch the CRD through the existing
-generic API. The fork's **VPA** views are the canonical example: `types/vpa.ts`,
-`pages/vpa-list-page.tsx` + `vpa-detail.tsx`, and `components/vpa-monitoring.tsx`
-/ `vpa-resource-comparison.tsx`. Other fork additions: per-container resource
-usage (`components/container-table.tsx`, `container-status-table.tsx`,
-`pod-resource-usage.tsx`), surfaced on `pages/pod-detail.tsx`.
+**CRD views need no backend change** (generic CRD API). Fork examples: VPA
+(`types/vpa.ts`, `pages/vpa-list-page.tsx` + `vpa-detail.tsx`,
+`components/vpa-*.tsx`); per-container usage (`components/container-table.tsx`,
+`pod-resource-usage.tsx`) on `pages/pod-detail.tsx`.
 
 ## Conventions
 

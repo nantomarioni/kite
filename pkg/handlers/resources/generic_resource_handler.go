@@ -91,7 +91,7 @@ func (h *GenericResourceHandler[T, V]) recordHistory(c *gin.Context, opType stri
 		ErrorMessage:  errMsg,
 		OperatorID:    user.ID,
 	}
-	if err := model.DB.Create(&history).Error; err != nil {
+	if err := model.DB.WithContext(context.WithoutCancel(c.Request.Context())).Create(&history).Error; err != nil {
 		klog.Errorf("Failed to create resource history: %v", err)
 	}
 }
@@ -534,14 +534,14 @@ func (h *GenericResourceHandler[T, V]) ListHistory(c *gin.Context) {
 
 	// Get total count
 	var total int64
-	if err := model.DB.Model(&model.ResourceHistory{}).Where("cluster_name = ? AND resource_type = ? AND resource_name = ? AND namespace = ?", cs.Name, h.name, resourceName, namespace).Count(&total).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Model(&model.ResourceHistory{}).Where("cluster_name = ? AND resource_type = ? AND resource_name = ? AND namespace = ?", cs.Name, h.name, resourceName, namespace).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Get paginated history
 	history := []model.ResourceHistory{}
-	if err := model.DB.Preload("Operator").Where("cluster_name = ? AND resource_type = ? AND resource_name = ? AND namespace = ?", cs.Name, h.name, resourceName, namespace).Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&history).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Preload("Operator").Where("cluster_name = ? AND resource_type = ? AND resource_name = ? AND namespace = ?", cs.Name, h.name, resourceName, namespace).Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&history).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

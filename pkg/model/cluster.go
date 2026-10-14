@@ -1,5 +1,7 @@
 package model
 
+import "context"
+
 type Cluster struct {
 	Model
 	Name          string       `json:"name" gorm:"type:varchar(100);uniqueIndex;not null"`
@@ -11,54 +13,54 @@ type Cluster struct {
 	Enable        bool         `json:"enable" gorm:"type:boolean;default:true"`
 }
 
-func AddCluster(cluster *Cluster) error {
-	return DB.Create(cluster).Error
+func AddCluster(ctx context.Context, cluster *Cluster) error {
+	return DB.WithContext(ctx).Create(cluster).Error
 }
 
-func GetClusterByName(name string) (*Cluster, error) {
+func GetClusterByName(ctx context.Context, name string) (*Cluster, error) {
 	var cluster Cluster
-	if err := DB.Where("name = ?", name).First(&cluster).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("name = ?", name).First(&cluster).Error; err != nil {
 		return nil, err
 	}
 	return &cluster, nil
 }
 
-func GetClusterByID(id uint) (*Cluster, error) {
+func GetClusterByID(ctx context.Context, id uint) (*Cluster, error) {
 	var cluster Cluster
-	if err := DB.First(&cluster, id).Error; err != nil {
+	if err := DB.WithContext(ctx).First(&cluster, id).Error; err != nil {
 		return nil, err
 	}
 	return &cluster, nil
 }
 
-func UpdateCluster(cluster *Cluster, updates map[string]interface{}) error {
-	return DB.Model(cluster).Updates(updates).Error
+func UpdateCluster(ctx context.Context, cluster *Cluster, updates map[string]interface{}) error {
+	return DB.WithContext(ctx).Model(cluster).Updates(updates).Error
 }
 
-func DeleteCluster(cluster *Cluster) error {
-	return DB.Delete(cluster).Error
+func DeleteCluster(ctx context.Context, cluster *Cluster) error {
+	return DB.WithContext(ctx).Delete(cluster).Error
 }
 
-func ClearDefaultCluster() error {
-	return DB.Model(&Cluster{}).Where("is_default = ?", true).Update("is_default", false).Error
+func ClearDefaultCluster(ctx context.Context) error {
+	return DB.WithContext(ctx).Model(&Cluster{}).Where("is_default = ?", true).Update("is_default", false).Error
 }
 
-func DisableCluster(cluster *Cluster) error {
-	return DB.Model(cluster).Update("enable", false).Error
+func DisableCluster(ctx context.Context, cluster *Cluster) error {
+	return DB.WithContext(ctx).Model(cluster).Update("enable", false).Error
 }
 
-func EnableCluster(cluster *Cluster) error {
-	return DB.Model(cluster).Update("enable", true).Error
+func EnableCluster(ctx context.Context, cluster *Cluster) error {
+	return DB.WithContext(ctx).Model(cluster).Update("enable", true).Error
 }
 
-func ListClusters() ([]*Cluster, error) {
+func ListClusters(ctx context.Context) ([]*Cluster, error) {
 	var clusters []*Cluster
-	if err := DB.Find(&clusters).Error; err != nil {
+	if err := DB.WithContext(ctx).Find(&clusters).Error; err != nil {
 		return nil, err
 	}
 	return clusters, nil
 }
 
-func CountClusters() (count int64, err error) {
-	return count, DB.Model(&Cluster{}).Count(&count).Error
+func CountClusters(ctx context.Context) (count int64, err error) {
+	return count, DB.WithContext(ctx).Model(&Cluster{}).Count(&count).Error
 }

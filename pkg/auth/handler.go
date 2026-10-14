@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"github.com/zxh326/kite/pkg/common"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"k8s.io/klog/v2"
 )
 
@@ -24,7 +27,7 @@ func NewAuthHandler() *AuthHandler {
 }
 
 func (h *AuthHandler) GetProviders(c *gin.Context) {
-	providers := h.manager.GetAvailableProviders()
+	providers := h.manager.GetAvailableProviders(c.Request.Context())
 	providers = append(providers, "password")
 	c.JSON(http.StatusOK, gin.H{
 		"providers": providers,
@@ -70,7 +73,7 @@ func (h *AuthHandler) PasswordLogin(c *gin.Context) {
 		return
 	}
 
-	user, err := model.GetUserByUsername(req.Username)
+	user, err := model.GetUserByUsername(c.Request.Context(), req.Username)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
@@ -86,7 +89,7 @@ func (h *AuthHandler) PasswordLogin(c *gin.Context) {
 		return
 	}
 
-	if err := model.LoginUser(user); err != nil {
+	if err := model.LoginUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed login"})
 		return
 	}
@@ -168,7 +171,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	if err := model.FindWithSubOrUpsertUser(user); err != nil {
+	if err := model.FindWithSubOrUpsertUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.Redirect(http.StatusFound, base+"/login?error=user_upsert_failed&reason=user_upsert_failed&provider="+provider)
 		return
 	}
@@ -221,7 +224,7 @@ func (h *AuthHandler) GetUser(c *gin.Context) {
 	})
 }
 
-func (h *AuthHandler) RequireAPIKeyAuth(c *gin.Context, token string) {
+func (h *AuthHandler) RequireAPIKeyAuth(ctx context.Context, c *gin.Context, token string) {
 	keyPart := strings.SplitN(token, "-", 2)
 	if len(keyPart) < 2 {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -240,7 +243,7 @@ func (h *AuthHandler) RequireAPIKeyAuth(c *gin.Context, token string) {
 		c.Abort()
 		return
 	}
-	apikey, err := model.GetUserByID(dbID)
+	apikey, err := model.GetUserByID(ctx, dbID)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "Invalid API key",
@@ -255,106 +258,126 @@ func (h *AuthHandler) RequireAPIKeyAuth(c *gin.Context, token string) {
 		c.Abort()
 		return
 	}
-	_ = model.LoginUser(apikey)
+	_ = model.LoginUser(context.WithoutCancel(ctx), apikey)
 	apikey.Roles = rbac.GetUserRoles(*apikey)
 	c.Set("user", *apikey)
 }
 
 func (h *AuthHandler) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if common.AnonymousUserEnabled {
-			u := model.GetAnonymousUser()
-			if u == nil {
-				c.Set("user", model.AnonymousUser)
-			} else {
-				u.Roles = model.AnonymousUser.Roles
-				c.Set("user", *u)
-			}
+		// The auth work is its own span, ended before c.Next() so downstream
+		// handlers are not nested inside it. Free with the global noop tracer.
+		ctx, span := otel.Tracer("github.com/zxh326/kite/pkg/auth").Start(c.Request.Context(), "auth.authenticate")
+		method, ok := h.authenticate(ctx, c)
+		result := "denied"
+		if ok {
+			result = "ok"
+		}
+		span.SetAttributes(
+			attribute.String("kite.auth.method", method),
+			attribute.String("kite.auth.result", result),
+		)
+		span.End()
+		if ok {
 			c.Next()
-			return
 		}
+	}
+}
 
-		// Auth Proxy authentication
-		if common.AuthProxyEnabled {
-			user, err := h.handleAuthProxyLogin(c)
-			if err == nil && user != nil {
-				user.Roles = rbac.GetUserRoles(*user)
-				c.Set("user", *user)
-				c.Next()
-				return
-			}
-			// If auth proxy is enabled but headers are missing, this is an error
-			// because we expect all requests to come through the proxy
-			if err != nil {
-				klog.V(1).Infof("Auth proxy login failed: %v", err)
-			}
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "Auth proxy authentication required",
-			})
-			c.Abort()
-			return
+// authenticate resolves the request's user and sets it on c. It returns the
+// auth method tried and whether the request may proceed; on failure the
+// response has been written and c aborted.
+func (h *AuthHandler) authenticate(ctx context.Context, c *gin.Context) (string, bool) {
+	if common.AnonymousUserEnabled {
+		u := model.GetAnonymousUser(ctx)
+		if u == nil {
+			c.Set("user", model.AnonymousUser)
+		} else {
+			u.Roles = model.AnonymousUser.Roles
+			c.Set("user", *u)
 		}
-		authHeader := c.GetHeader("Authorization")
-		// bot token
-		if authHeader != "" {
-			if after, ok := strings.CutPrefix(authHeader, "kite"); ok {
-				h.RequireAPIKeyAuth(c, after)
-				return
-			}
+		return "anonymous", true
+	}
+
+	// Auth Proxy authentication
+	if common.AuthProxyEnabled {
+		user, err := h.handleAuthProxyLogin(ctx, c)
+		if err == nil && user != nil {
+			user.Roles = rbac.GetUserRoles(*user)
+			c.Set("user", *user)
+			return "authproxy", true
 		}
-		// Try to read auth token cookie (if missing, tokenString will be empty)
-		tokenString, _ := c.Cookie("auth_token")
-		if tokenString == "" {
+		// If auth proxy is enabled but headers are missing, this is an error
+		// because we expect all requests to come through the proxy
+		if err != nil {
+			klog.V(1).Infof("Auth proxy login failed: %v", err)
+		}
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Auth proxy authentication required",
+		})
+		c.Abort()
+		return "authproxy", false
+	}
+	authHeader := c.GetHeader("Authorization")
+	// bot token
+	if authHeader != "" {
+		if after, ok := strings.CutPrefix(authHeader, "kite"); ok {
+			h.RequireAPIKeyAuth(ctx, c, after)
+			return "apikey", !c.IsAborted()
+		}
+	}
+	// Try to read auth token cookie (if missing, tokenString will be empty)
+	tokenString, _ := c.Cookie("auth_token")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Invalid or expired token",
+		})
+		c.Abort()
+		return "jwt", false
+	}
+
+	// Validate and potentially refresh the token
+	claims, err := h.manager.ValidateJWT(tokenString)
+	if err != nil {
+		// Try to refresh the token if validation fails
+		refreshedToken, refreshErr := h.manager.RefreshJWT(c, tokenString)
+		if refreshErr != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid or expired token",
 			})
+			setCookieSecure(c, "auth_token", "", -1)
 			c.Abort()
-			return
+			return "jwt", false
 		}
-
-		// Validate and potentially refresh the token
-		claims, err := h.manager.ValidateJWT(tokenString)
+		setCookieSecure(c, "auth_token", refreshedToken, common.CookieExpirationSeconds)
+		// Validate the refreshed token
+		claims, err = h.manager.ValidateJWT(refreshedToken)
 		if err != nil {
-			// Try to refresh the token if validation fails
-			refreshedToken, refreshErr := h.manager.RefreshJWT(c, tokenString)
-			if refreshErr != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "Invalid or expired token",
-				})
-				setCookieSecure(c, "auth_token", "", -1)
-				c.Abort()
-				return
-			}
-			setCookieSecure(c, "auth_token", refreshedToken, common.CookieExpirationSeconds)
-			// Validate the refreshed token
-			claims, err = h.manager.ValidateJWT(refreshedToken)
-			if err != nil {
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "Failed to validate refreshed token",
-				})
-				setCookieSecure(c, "auth_token", "", -1)
-				c.Abort()
-				return
-			}
-		}
-		user, err := model.GetUserByID(uint64(claims.UserID))
-		if err != nil || !user.Enabled {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "user not found",
+				"error": "Failed to validate refreshed token",
 			})
 			setCookieSecure(c, "auth_token", "", -1)
 			c.Abort()
-			return
+			return "jwt", false
 		}
-		user.Roles = rbac.GetUserRoles(*user)
-		c.Set("user", *user)
-		c.Next()
 	}
+	user, err := model.GetUserByID(ctx, uint64(claims.UserID))
+	if err != nil || !user.Enabled {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "user not found",
+		})
+		setCookieSecure(c, "auth_token", "", -1)
+		c.Abort()
+		return "jwt", false
+	}
+	user.Roles = rbac.GetUserRoles(*user)
+	c.Set("user", *user)
+	return "jwt", true
 }
 
 // handleAuthProxyLogin handles authentication via reverse proxy headers.
 // It extracts user info from trusted headers and creates/updates the user.
-func (h *AuthHandler) handleAuthProxyLogin(c *gin.Context) (*model.User, error) {
+func (h *AuthHandler) handleAuthProxyLogin(ctx context.Context, c *gin.Context) (*model.User, error) {
 	uid := c.GetHeader(common.AuthProxyHeaderUID)
 	if uid == "" {
 		return nil, fmt.Errorf("missing required header: %s", common.AuthProxyHeaderUID)
@@ -383,7 +406,7 @@ func (h *AuthHandler) handleAuthProxyLogin(c *gin.Context) (*model.User, error) 
 	klog.V(1).Infof("Auth proxy login: uid=%s, username=%s, name=%s, groups=%v",
 		uid, username, name, groups)
 
-	user, err := model.FindOrCreateAuthProxyUser(uid, username, name, email, groups)
+	user, err := model.FindOrCreateAuthProxyUser(context.WithoutCancel(ctx), uid, username, name, email, groups)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find/create auth proxy user: %w", err)
 	}
@@ -450,7 +473,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 // OAuth Provider Management APIs
 
 func (h *AuthHandler) ListOAuthProviders(c *gin.Context) {
-	providers, err := model.GetAllOAuthProviders()
+	providers, err := model.GetAllOAuthProviders(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to retrieve OAuth providers",
@@ -485,7 +508,7 @@ func (h *AuthHandler) CreateOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	if err := model.CreateOAuthProvider(&provider); err != nil {
+	if err := model.CreateOAuthProvider(c.Request.Context(), &provider); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to create OAuth provider: " + err.Error(),
 		})
@@ -543,7 +566,7 @@ func (h *AuthHandler) UpdateOAuthProvider(c *gin.Context) {
 		updates["client_secret"] = provider.ClientSecret
 	}
 
-	if err := model.UpdateOAuthProvider(&provider, updates); err != nil {
+	if err := model.UpdateOAuthProvider(c.Request.Context(), &provider, updates); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to update OAuth provider: " + err.Error(),
 		})
@@ -566,7 +589,7 @@ func (h *AuthHandler) DeleteOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteOAuthProvider(uint(dbID)); err != nil {
+	if err := model.DeleteOAuthProvider(c.Request.Context(), uint(dbID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to delete OAuth provider: " + err.Error(),
 		})
@@ -589,7 +612,7 @@ func (h *AuthHandler) GetOAuthProvider(c *gin.Context) {
 	}
 
 	var provider model.OAuthProvider
-	if err := model.DB.First(&provider, uint(dbID)).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).First(&provider, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "OAuth provider not found",
 		})

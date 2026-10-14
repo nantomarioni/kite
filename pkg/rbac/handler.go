@@ -11,7 +11,7 @@ import (
 // ListRoles returns all roles with assignments
 func ListRoles(c *gin.Context) {
 	var roles []model.Role
-	if err := model.DB.Preload("Assignments").Find(&roles).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Preload("Assignments").Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list roles: " + err.Error()})
 		return
 	}
@@ -27,7 +27,7 @@ func GetRole(c *gin.Context) {
 		return
 	}
 	var role model.Role
-	if err := model.DB.Preload("Assignments").First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Preload("Assignments").First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
@@ -45,7 +45,7 @@ func CreateRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "role name is required"})
 		return
 	}
-	if err := model.DB.Create(&role).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Create(&role).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create role: " + err.Error()})
 		return
 	}
@@ -71,7 +71,7 @@ func UpdateRole(c *gin.Context) {
 		return
 	}
 	var role model.Role
-	if err := model.DB.First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
@@ -83,7 +83,7 @@ func UpdateRole(c *gin.Context) {
 	role.Resources = req.Resources
 	role.Verbs = req.Verbs
 
-	if err := model.DB.Save(&role).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Save(&role).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role: " + err.Error()})
 		return
 	}
@@ -102,7 +102,7 @@ func DeleteRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role id"})
 		return
 	}
-	if err := model.DB.Delete(&model.Role{}, uint(dbID)).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Delete(&model.Role{}, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete role: " + err.Error()})
 		return
 	}
@@ -139,14 +139,14 @@ func AssignRole(c *gin.Context) {
 	}
 	// ensure role exists
 	var role model.Role
-	if err := model.DB.First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
 
 	// check exists
 	var existing model.RoleAssignment
-	if err := model.DB.Where("role_id = ? AND subject_type = ? AND subject = ?", role.ID, req.SubjectType, req.Subject).First(&existing).Error; err == nil {
+	if err := model.DB.WithContext(c.Request.Context()).Where("role_id = ? AND subject_type = ? AND subject = ?", role.ID, req.SubjectType, req.Subject).First(&existing).Error; err == nil {
 		c.JSON(http.StatusOK, gin.H{"assignment": existing})
 		return
 	}
@@ -156,7 +156,7 @@ func AssignRole(c *gin.Context) {
 		SubjectType: req.SubjectType,
 		Subject:     req.Subject,
 	}
-	if err := model.DB.Create(&assignment).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Create(&assignment).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create assignment: " + err.Error()})
 		return
 	}
@@ -181,7 +181,7 @@ func UnassignRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "subjectType and subject query params are required"})
 		return
 	}
-	if err := model.DB.Where("role_id = ? AND subject_type = ? AND subject = ?", uint(dbID), subjectType, subject).Delete(&model.RoleAssignment{}).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Where("role_id = ? AND subject_type = ? AND subject = ?", uint(dbID), subjectType, subject).Delete(&model.RoleAssignment{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove assignment: " + err.Error()})
 		return
 	}

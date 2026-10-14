@@ -219,6 +219,9 @@ func main() {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// Let handlers pass c as a context.Context: it then carries the request's
+	// cancellation and (when tracing) its span.
+	r.ContextWithFallback = true
 	if tracing.Enabled() {
 		r.Use(tracing.Middleware()...)
 	}
@@ -231,6 +234,9 @@ func main() {
 	r.Use(middleware.Logger())
 	r.Use(middleware.CORS())
 	model.InitDB()
+	if err := tracing.InstrumentDB(model.DB); err != nil {
+		klog.Warningf("Failed to instrument database for tracing: %v", err)
+	}
 	rbac.InitRBAC()
 	handlers.InitTemplates()
 	internal.LoadConfigFromEnv()

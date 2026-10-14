@@ -129,7 +129,7 @@ func InitCheck(c *gin.Context) {
 	// 	return
 	// }
 	step := 0
-	uc, _ := model.CountUsers()
+	uc, _ := model.CountUsers(c.Request.Context())
 	if uc == 0 && !common.AnonymousUserEnabled {
 		c.SetCookie("auth_token", "", -1, "/", "", false, true)
 		c.JSON(http.StatusOK, gin.H{"initialized": false, "step": step})
@@ -137,7 +137,7 @@ func InitCheck(c *gin.Context) {
 	if uc > 0 || common.AnonymousUserEnabled {
 		step++
 	}
-	cc, _ := model.CountClusters()
+	cc, _ := model.CountClusters(c.Request.Context())
 	if cc > 0 {
 		step++
 	}

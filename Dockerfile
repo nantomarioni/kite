@@ -4,7 +4,9 @@ WORKDIR /app/ui
 
 COPY ui/package.json ui/pnpm-lock.yaml ./
 
-RUN npm install -g pnpm && \
+# Pinned to the major CI uses (ci.yml: pnpm 10); unpinned `pnpm` now resolves to
+# a major that fails on ignored dependency build scripts (ERR_PNPM_IGNORED_BUILDS).
+RUN npm install -g pnpm@10.34.6 && \
     pnpm install --frozen-lockfile
 
 COPY ui/ ./

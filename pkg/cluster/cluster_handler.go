@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,7 +48,7 @@ func (cm *ClusterManager) GetClusters(c *gin.Context) {
 }
 
 func (cm *ClusterManager) GetClusterList(c *gin.Context) {
-	clusters, err := model.ListClusters()
+	clusters, err := model.ListClusters(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -94,7 +95,7 @@ func (cm *ClusterManager) CreateCluster(c *gin.Context) {
 		return
 	}
 
-	if _, err := model.GetClusterByName(req.Name); err == nil {
+	if _, err := model.GetClusterByName(c.Request.Context(), req.Name); err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "cluster already exists"})
 		return
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -102,8 +103,11 @@ func (cm *ClusterManager) CreateCluster(c *gin.Context) {
 		return
 	}
 
+	// Clearing the default and adding the cluster must not be split by a
+	// client disconnect.
+	writeCtx := context.WithoutCancel(c.Request.Context())
 	if req.IsDefault {
-		if err := model.ClearDefaultCluster(); err != nil {
+		if err := model.ClearDefaultCluster(writeCtx); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -119,7 +123,7 @@ func (cm *ClusterManager) CreateCluster(c *gin.Context) {
 		Enable:        true,
 	}
 
-	if err := model.AddCluster(cluster); err != nil {
+	if err := model.AddCluster(writeCtx, cluster); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -155,7 +159,7 @@ func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
 		return
 	}
 
-	cluster, err := model.GetClusterByID(uint(id))
+	cluster, err := model.GetClusterByID(c.Request.Context(), uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -165,8 +169,11 @@ func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
 		return
 	}
 
+	// Clearing the default and updating the cluster must not be split by a
+	// client disconnect.
+	writeCtx := context.WithoutCancel(c.Request.Context())
 	if req.IsDefault && !cluster.IsDefault {
-		if err := model.ClearDefaultCluster(); err != nil {
+		if err := model.ClearDefaultCluster(writeCtx); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -188,7 +195,7 @@ func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
 		updates["config"] = model.SecretString(req.Config)
 	}
 
-	if err := model.UpdateCluster(cluster, updates); err != nil {
+	if err := model.UpdateCluster(writeCtx, cluster, updates); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -206,7 +213,7 @@ func (cm *ClusterManager) DeleteCluster(c *gin.Context) {
 		return
 	}
 
-	cluster, err := model.GetClusterByID(uint(id))
+	cluster, err := model.GetClusterByID(c.Request.Context(), uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
@@ -221,7 +228,7 @@ func (cm *ClusterManager) DeleteCluster(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteCluster(cluster); err != nil {
+	if err := model.DeleteCluster(c.Request.Context(), cluster); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -243,7 +250,7 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 		return
 	}
 
-	cc, err := model.CountClusters()
+	cc, err := model.CountClusters(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -262,7 +269,7 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 			IsDefault:   true,
 			Enable:      true,
 		}
-		if err := model.AddCluster(cluster); err != nil {
+		if err := model.AddCluster(context.WithoutCancel(c.Request.Context()), cluster); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -279,7 +286,8 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 		return
 	}
 
-	importedCount := ImportClustersFromKubeconfig(kubeconfig)
+	// A partial import would block a retry ("import not allowed when clusters exist").
+	importedCount := ImportClustersFromKubeconfig(context.WithoutCancel(c.Request.Context()), kubeconfig)
 	syncNow <- struct{}{}
 	// wait for sync to complete
 	time.Sleep(1 * time.Second)

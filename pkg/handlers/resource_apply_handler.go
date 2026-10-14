@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -79,7 +80,7 @@ func (h *ResourceApplyHandler) ApplyResource(c *gin.Context) {
 		if err != nil {
 			errMessage = err.Error()
 		}
-		model.DB.Create(&model.ResourceHistory{
+		model.DB.WithContext(context.WithoutCancel(ctx)).Create(&model.ResourceHistory{
 			ClusterName:   cs.Name,
 			ResourceType:  resource,
 			ResourceName:  obj.GetName(),

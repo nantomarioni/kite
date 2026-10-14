@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,7 @@ type UpdateTemplateRequest struct {
 
 func ListTemplates(c *gin.Context) {
 	var templates []model.ResourceTemplate
-	if err := model.DB.Find(&templates).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Find(&templates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -40,7 +41,7 @@ func CreateTemplate(c *gin.Context) {
 		YAML:        req.YAML,
 	}
 
-	if err := model.DB.Create(&template).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Create(&template).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -51,7 +52,7 @@ func CreateTemplate(c *gin.Context) {
 func UpdateTemplate(c *gin.Context) {
 	id := c.Param("id")
 	var template model.ResourceTemplate
-	if err := model.DB.First(&template, id).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).First(&template, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Template not found"})
 		return
 	}
@@ -65,7 +66,7 @@ func UpdateTemplate(c *gin.Context) {
 	template.Description = req.Description
 	template.YAML = req.YAML
 
-	if err := model.DB.Save(&template).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Save(&template).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -75,7 +76,7 @@ func UpdateTemplate(c *gin.Context) {
 
 func DeleteTemplate(c *gin.Context) {
 	id := c.Param("id")
-	if err := model.DB.Delete(&model.ResourceTemplate{}, id).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Delete(&model.ResourceTemplate{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -84,7 +85,7 @@ func DeleteTemplate(c *gin.Context) {
 
 func InitTemplates() {
 	var count int64
-	model.DB.Model(&model.ResourceTemplate{}).Count(&count)
+	model.DB.WithContext(context.Background()).Model(&model.ResourceTemplate{}).Count(&count)
 	if count > 0 {
 		return
 	}
@@ -366,6 +367,6 @@ metadata:
 	}
 
 	for _, t := range templates {
-		model.DB.Create(&t)
+		model.DB.WithContext(context.Background()).Create(&t)
 	}
 }

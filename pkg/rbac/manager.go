@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -18,7 +19,7 @@ var (
 
 func InitRBAC() {
 	once.Do(func() {
-		if err := model.InitDefaultRole(); err != nil {
+		if err := model.InitDefaultRole(context.Background()); err != nil {
 			panic(fmt.Sprintf("failed to init default roles: %v", err))
 		}
 		go SyncRolesConfig()
@@ -33,7 +34,7 @@ func loadRolesFromDB() error {
 	}
 
 	var roles []model.Role
-	if err := model.DB.Preload("Assignments").Find(&roles).Error; err != nil {
+	if err := model.DB.WithContext(context.Background()).Preload("Assignments").Find(&roles).Error; err != nil {
 		return err
 	}
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -82,9 +83,14 @@ func (h *SearchHandler) GlobalSearch(c *gin.Context) {
 			Results: cachedResults,
 			Total:   len(cachedResults),
 		}
+		// The refresh outlives the request: gin recycles c once the handler
+		// returns, and the request context is cancelled then. Use a copy whose
+		// context keeps the trace parent but not the cancellation.
+		cc := c.Copy()
+		cc.Request = cc.Request.WithContext(context.WithoutCancel(c.Request.Context()))
 		go func() {
 			// Perform search in the background to update cache
-			_, _ = h.Search(c, query, limit)
+			_, _ = h.Search(cc, query, limit)
 		}()
 		c.JSON(http.StatusOK, response)
 		return

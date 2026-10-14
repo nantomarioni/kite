@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -188,7 +189,7 @@ func (cm *ClusterManager) GetClientSet(clusterName string) (*ClientSet, error) {
 	return nil, fmt.Errorf("cluster not found: %s", clusterName)
 }
 
-func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config) int64 {
+func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.Config) int64 {
 	if len(kubeconfig.Contexts) == 0 {
 		return 0
 	}
@@ -215,9 +216,9 @@ func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config) int64 {
 			Config:    model.SecretString(configStr),
 			IsDefault: contextName == kubeconfig.CurrentContext,
 		}
-		if _, err := model.GetClusterByName(contextName); err != nil {
+		if _, err := model.GetClusterByName(ctx, contextName); err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := model.AddCluster(&cluster); err != nil {
+				if err := model.AddCluster(ctx, &cluster); err != nil {
 					continue
 				}
 				importedCount++
@@ -234,7 +235,7 @@ var (
 )
 
 func syncClusters(cm *ClusterManager) error {
-	clusters, err := model.ListClusters()
+	clusters, err := model.ListClusters(context.Background())
 	if err != nil {
 		klog.Warningf("list cluster err: %v", err)
 		time.Sleep(5 * time.Second)

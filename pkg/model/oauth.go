@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 type OAuthProvider struct {
 	Model
@@ -19,24 +22,24 @@ type OAuthProvider struct {
 }
 
 // GetAllOAuthProviders returns all OAuth providers from database
-func GetAllOAuthProviders() ([]OAuthProvider, error) {
+func GetAllOAuthProviders(ctx context.Context) ([]OAuthProvider, error) {
 	var providers []OAuthProvider
-	err := DB.Find(&providers).Error
+	err := DB.WithContext(ctx).Find(&providers).Error
 	return providers, err
 }
 
 // GetEnabledOAuthProviders returns only enabled OAuth providers
-func GetEnabledOAuthProviders() ([]OAuthProvider, error) {
+func GetEnabledOAuthProviders(ctx context.Context) ([]OAuthProvider, error) {
 	var providers []OAuthProvider
-	err := DB.Where("enabled = ?", true).Find(&providers).Error
+	err := DB.WithContext(ctx).Where("enabled = ?", true).Find(&providers).Error
 	return providers, err
 }
 
 // GetOAuthProviderByName returns an OAuth provider by name
-func GetOAuthProviderByName(name string) (OAuthProvider, error) {
+func GetOAuthProviderByName(ctx context.Context, name string) (OAuthProvider, error) {
 	var provider OAuthProvider
 	name = strings.ToLower(name)
-	err := DB.Where("name = ? AND enabled = ?", name, true).First(&provider).Error
+	err := DB.WithContext(ctx).Where("name = ? AND enabled = ?", name, true).First(&provider).Error
 	if err != nil {
 		return OAuthProvider{}, err
 	}
@@ -44,16 +47,16 @@ func GetOAuthProviderByName(name string) (OAuthProvider, error) {
 }
 
 // CreateOAuthProvider creates a new OAuth provider
-func CreateOAuthProvider(provider *OAuthProvider) error {
-	return DB.Create(provider).Error
+func CreateOAuthProvider(ctx context.Context, provider *OAuthProvider) error {
+	return DB.WithContext(ctx).Create(provider).Error
 }
 
 // UpdateOAuthProvider updates an existing OAuth provider
-func UpdateOAuthProvider(provider *OAuthProvider, updates map[string]interface{}) error {
-	return DB.Model(provider).Updates(updates).Error
+func UpdateOAuthProvider(ctx context.Context, provider *OAuthProvider, updates map[string]interface{}) error {
+	return DB.WithContext(ctx).Model(provider).Updates(updates).Error
 }
 
 // DeleteOAuthProvider deletes an OAuth provider by ID
-func DeleteOAuthProvider(id uint) error {
-	return DB.Delete(&OAuthProvider{}, id).Error
+func DeleteOAuthProvider(ctx context.Context, id uint) error {
+	return DB.WithContext(ctx).Delete(&OAuthProvider{}, id).Error
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -45,7 +46,7 @@ func getRequestHost(c *gin.Context) string {
 }
 
 func (om *OAuthManager) GetProvider(c *gin.Context, name string) (OAuthProvider, error) {
-	dbProvider, err := model.GetOAuthProviderByName(name)
+	dbProvider, err := model.GetOAuthProviderByName(c.Request.Context(), name)
 	if err != nil {
 		return nil, err
 	}
@@ -53,9 +54,9 @@ func (om *OAuthManager) GetProvider(c *gin.Context, name string) (OAuthProvider,
 	return NewGenericProvider(dbProvider)
 }
 
-func (om *OAuthManager) GetAvailableProviders() []string {
+func (om *OAuthManager) GetAvailableProviders(ctx context.Context) []string {
 	var providers []string
-	dbProviders, err := model.GetEnabledOAuthProviders()
+	dbProviders, err := model.GetEnabledOAuthProviders(ctx)
 	if err != nil {
 		klog.Warningf("Failed to load OAuth providers from database: %v", err)
 	} else {

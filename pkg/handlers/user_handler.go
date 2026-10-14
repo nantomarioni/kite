@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -23,7 +24,7 @@ func CreateSuperUser(c *gin.Context) {
 		return
 	}
 
-	uc, err := model.CountUsers()
+	uc, err := model.CountUsers(c.Request.Context())
 	if err != nil {
 		c.JSON(500, gin.H{"error": "failed to count users"})
 		return
@@ -40,7 +41,7 @@ func CreateSuperUser(c *gin.Context) {
 		Provider: "password",
 	}
 
-	if err := model.AddSuperUser(user); err != nil {
+	if err := model.AddSuperUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(500, gin.H{"error": "failed to create super user"})
 		return
 	}
@@ -62,13 +63,13 @@ func CreatePasswordUser(c *gin.Context) {
 		Provider: "password",
 	}
 
-	_, err := model.GetUserByUsername(user.Username)
+	_, err := model.GetUserByUsername(c.Request.Context(), user.Username)
 	if err == nil {
 		c.JSON(400, gin.H{"error": "user already exists"})
 		return
 	}
 
-	if err := model.AddUser(user); err != nil {
+	if err := model.AddUser(c.Request.Context(), user); err != nil {
 		c.JSON(500, gin.H{"error": "failed to create user"})
 		return
 	}
@@ -92,7 +93,7 @@ func ListUsers(c *gin.Context) {
 	}
 	offset := (page - 1) * size
 
-	users, total, err := model.ListUsers(size, offset)
+	users, total, err := model.ListUsers(c.Request.Context(), size, offset)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "failed to list users"})
 		return
@@ -119,7 +120,7 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	user, err := model.GetUserByID(id)
+	user, err := model.GetUserByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "user not found"})
 		return
@@ -131,7 +132,7 @@ func UpdateUser(c *gin.Context) {
 		user.AvatarURL = req.AvatarURL
 	}
 
-	if err := model.UpdateUser(user); err != nil {
+	if err := model.UpdateUser(c.Request.Context(), user); err != nil {
 		c.JSON(500, gin.H{"error": "failed to update user"})
 		return
 	}
@@ -145,7 +146,7 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteUserByID(id); err != nil {
+	if err := model.DeleteUserByID(context.WithoutCancel(c.Request.Context()), id); err != nil {
 		c.JSON(500, gin.H{"error": "failed to delete user"})
 		return
 	}
@@ -165,7 +166,7 @@ func ResetPassword(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if err := model.ResetPasswordByID(id, req.Password); err != nil {
+	if err := model.ResetPasswordByID(c.Request.Context(), id, req.Password); err != nil {
 		c.JSON(500, gin.H{"error": "failed to reset password"})
 		return
 	}
@@ -185,7 +186,7 @@ func SetUserEnabled(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if err := model.SetUserEnabled(id, req.Enabled); err != nil {
+	if err := model.SetUserEnabled(c.Request.Context(), id, req.Enabled); err != nil {
 		c.JSON(500, gin.H{"error": "failed to set enabled"})
 		return
 	}
@@ -202,7 +203,7 @@ func UpdateSidebarPreference(c *gin.Context) {
 		return
 	}
 	user.SidebarPreference = req.SidebarPreference
-	if err := model.UpdateUser(&user); err != nil {
+	if err := model.UpdateUser(c.Request.Context(), &user); err != nil {
 		klog.Errorf("failed to update sidebar preference for user %s: %v", user.Username, err)
 		c.JSON(500, gin.H{"error": "failed to update sidebar preference"})
 		return

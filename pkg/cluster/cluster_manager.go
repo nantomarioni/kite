@@ -11,6 +11,7 @@ import (
 	"github.com/zxh326/kite/pkg/kube"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/prometheus"
+	"github.com/zxh326/kite/pkg/tracing"
 	"gorm.io/gorm"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -64,6 +65,14 @@ func newClientSet(name string, k8sConfig *rest.Config, prometheusURL string) (*C
 		Name:          name,
 		prometheusURL: prometheusURL,
 	}
+	if tracing.Enabled() {
+		// Every client-go / controller-runtime request (incl. the Prometheus
+		// apiserver-proxy transport below) goes through this wrapper.
+		k8sConfig = rest.CopyConfig(k8sConfig)
+		k8sConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+			return tracing.WrapTransport("kubernetes", rt)
+		})
+	}
 	var err error
 	cs.K8sClient, err = kube.NewClient(k8sConfig)
 	if err != nil {
@@ -88,7 +97,7 @@ func newClientSet(name string, k8sConfig *rest.Config, prometheusURL string) (*C
 				klog.Infof("Using k8s API proxy for Prometheus in cluster %s", name)
 			}
 		}
-		cs.PromClient, err = prometheus.NewClientWithRoundTripper(prometheusURL, rt)
+		cs.PromClient, err = prometheus.NewClientWithRoundTripper(prometheusURL, tracing.WrapTransport("prometheus", rt))
 		if err != nil {
 			klog.Warningf("Failed to create Prometheus client for cluster %s, some features may not work as expected, err: %v", name, err)
 		}

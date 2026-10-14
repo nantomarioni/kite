@@ -28,6 +28,7 @@ import (
 	"github.com/zxh326/kite/pkg/middleware"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
+	"github.com/zxh326/kite/pkg/tracing"
 	"github.com/zxh326/kite/pkg/utils"
 	"github.com/zxh326/kite/pkg/version"
 	"k8s.io/klog/v2"
@@ -210,8 +211,17 @@ func main() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 	common.LoadEnvs()
+	// Tracing reads the standard OTEL_* env itself; off unless an endpoint is set.
+	// Must run before cluster.NewClusterManager() so k8s transports get wrapped.
+	shutdownTracing, err := tracing.Init(context.Background())
+	if err != nil {
+		klog.Warningf("Failed to initialize tracing, continuing without it: %v", err)
+	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	if tracing.Enabled() {
+		r.Use(tracing.Middleware()...)
+	}
 	r.Use(middleware.Metrics())
 	if !common.DisableGZIP {
 		klog.Info("GZIP compression is enabled")
@@ -255,7 +265,15 @@ func main() {
 	klog.Info("Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		klog.Fatalf("Failed to shutdown server: %v", err)
+	shutdownErr := srv.Shutdown(ctx)
+
+	tracingCtx, tracingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer tracingCancel()
+	if err := shutdownTracing(tracingCtx); err != nil {
+		klog.Warningf("Failed to flush traces: %v", err)
+	}
+
+	if shutdownErr != nil {
+		klog.Fatalf("Failed to shutdown server: %v", shutdownErr)
 	}
 }

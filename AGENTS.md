@@ -29,8 +29,10 @@ upstream; **`fork`** = `main` + local commits and is what deploys. The Go module
 path stays `github.com/zxh326/kite` — don't rename it. Local additions (the
 canonical "how we add features" examples): VPA views, per-container resource
 usage, pod termination reason / resource config, app-view, **auth-proxy**
-support, the homelab CI/CD workflow. Most fork work is in `ui/`; backend touch
-points are `pkg/auth/handler.go`, `pkg/common/common.go`, `pkg/model/user.go`.
+support, **OpenTelemetry tracing**, the homelab CI/CD workflow. Most fork work
+is in `ui/`; backend touch points are `pkg/auth/handler.go`,
+`pkg/common/common.go`, `pkg/model/user.go`, plus tracing: `pkg/tracing/`,
+its `main.go` wiring and `pkg/cluster/cluster_manager.go` (transport wrap).
 Keep the upstream diff small and rebase-friendly; add rather than rewrite.
 
 > `README*.md` and `docs/` are upstream-authored (`kite.zzde.me`). Trust this
@@ -85,7 +87,8 @@ Minimum per component: backend `go vet ./... && golangci-lint run && go test
 - **Config is env-driven** via `pkg/common/common.go` `LoadEnvs()` (`PORT`,
   `JWT_SECRET`, `DB_TYPE`/`DB_DSN` — sqlite default `dev.db`, `KITE_ENCRYPT_KEY`,
   `KITE_BASE`, `AUTH_PROXY_*`, `ANONYMOUS_USER_ENABLED`). Read the `common`
-  package vars, not scattered `os.Getenv`.
+  package vars, not scattered `os.Getenv`. Exception: `pkg/tracing` lets the
+  OTel SDK read the standard `OTEL_*` env itself; no OTLP endpoint = tracing off.
 - **Clusters** persist in the DB (`pkg/cluster/cluster_manager.go`); a request
   selects one via the `x-cluster-name` header (`ClusterMiddleware`).
 - **Auth**: JWT in an httpOnly cookie + refresh; password / OAuth / API-key /
@@ -97,7 +100,7 @@ Minimum per component: backend `go vet ./... && golangci-lint run && go test
 main.go                 # Gin engine, router wiring, static embed, graceful shutdown
 internal/load.go        # extra env/config loading
 pkg/                    # backend (pkg/AGENTS.md): handlers/ (resources/ = k8s API), cluster/, kube/,
-                        #   auth/ rbac/ model/, middleware/ common/, prometheus/ appview/ version/ utils/
+                        #   auth/ rbac/ model/, middleware/ common/, prometheus/ appview/ version/ utils/ tracing/
 ui/                     # frontend (ui/AGENTS.md): src/{pages,components,lib,types,contexts,hooks,i18n}, vite.config.ts (outDir ../static)
 static/                 # BUILD OUTPUT embedded by main.go — gitignored
 charts/kite/ deploy/ docs/   # upstream Helm chart, install.yaml, VitePress docs (not used by the fork deploy)
@@ -142,13 +145,16 @@ Check the other side before declaring done. Siblings are `../<repo>` checkouts
   = `X-Authentik-*`, `AUTH_PROXY_DEFAULT_ROLE=guest`; its Traefik `Middleware`
   `authentik-auth` forwards exactly those `authResponseHeaders`. Renaming an
   `AUTH_PROXY_*` env var in `pkg/common/common.go` or the image/port shape is a
-  change there too.
+  change there too. `extraEnvs` also set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+  (VictoriaTraces URL, pinned by its `fullnameOverride`) and
+  `OTEL_SERVICE_NAME=kite`; kite continues Traefik's `traceparent`.
 - **`homelab`** — the Authentik proxy provider for `kite.antomarioni.com`
   (`terraform/3-core-config/authentik-kite.tf`, `forward_domain` mode) is what
   populates the `X-Authentik-*` headers; group → role mapping on the kite side
   assumes Authentik group names.
 - **Upstream `zxh326/kite`** — fork-only backend code stays isolated to
-  `pkg/auth/handler.go`, `pkg/common/common.go`, `pkg/model/user.go`; most fork
+  `pkg/auth/handler.go`, `pkg/common/common.go`, `pkg/model/user.go` and
+  `pkg/tracing/` (+ its hooks in `main.go`, `cluster_manager.go`); most fork
   features are frontend-only on the generic API.
 
 ## When stuck

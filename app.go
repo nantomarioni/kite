@@ -15,6 +15,7 @@ import (
 	"github.com/zxh326/kite/pkg/scheduler"
 	"github.com/zxh326/kite/pkg/telemetry"
 	"github.com/zxh326/kite/pkg/templates"
+	"github.com/zxh326/kite/pkg/tracing"
 	"k8s.io/klog/v2"
 )
 
@@ -55,6 +56,9 @@ func buildEngine(cm *cluster.ClusterManager) *gin.Engine {
 	r := gin.New()
 	middleware.ConfigureRawPathRouting(r)
 	configureTrustedProxies(r)
+	if tracing.Enabled() {
+		r.Use(tracing.Middleware()...)
+	}
 	r.Use(middleware.Metrics())
 	if !common.DisableGZIP {
 		klog.Info("GZIP compression is enabled")

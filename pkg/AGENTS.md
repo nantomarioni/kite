@@ -25,17 +25,20 @@ pkg/
 ├── model/                    # GORM models + InitDB (AutoMigrate); user/cluster/oauth/role/template/history
 ├── middleware/               # auth, cluster (x-cluster-name), cors, logger, metrics, rbac
 ├── common/                   # config vars + LoadEnvs(); shared types; rbac constants
+├── tracing/                  # (fork) OTel: Init, gin middleware, WrapTransport
 ├── prometheus/ appview/ version/ utils/
 ```
 
 ## Request pipeline (from `main.go`)
 
-Global: `Metrics → gzip(opt) → Recovery → Logger → CORS`; groups under `common.Base`:
+Global: `tracing (if enabled) → Metrics → gzip(opt) → Recovery → Logger → CORS`; groups under `common.Base`:
 **Public** `/healthz`, `/api/v1/version`, `/api/v1/init_check`, `/api/auth/*`
 (bootstrap `create_super_user` + `clusters/import` are pre-auth until setup
 completes); **Admin** `/api/v1/admin` = `RequireAuth()` + `RequireAdmin()`;
 **Protected** `/api/v1` = `RequireAuth()` + `ClusterMiddleware(cm)`, resource
 routes add `RBACMiddleware()` before `resources.RegisterRoutes(api)`.
+Outbound k8s/Prometheus client spans need a parent span in the request
+context (no orphan informer traces); upgrade/exec/WebSocket requests are skipped.
 
 ## The resource handler pattern (most important)
 

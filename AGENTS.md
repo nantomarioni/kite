@@ -32,7 +32,10 @@ usage, pod termination reason / resource config, app-view, **auth-proxy**
 support, **OpenTelemetry tracing**, the homelab CI/CD workflow. Most fork work
 is in `ui/`; backend touch points are `pkg/auth/handler.go`,
 `pkg/common/common.go`, `pkg/model/user.go`, plus tracing: `pkg/tracing/`,
-its `main.go` wiring and `pkg/cluster/cluster_manager.go` (transport wrap).
+its `main.go` wiring, one-line hooks in `pkg/cluster/cluster_manager.go`,
+`pkg/kube/client.go`, `pkg/prometheus/client.go` and both Describe handlers,
+and `ctx` plumbing through every `pkg/model` func + callers (a wide upstream
+diff — expect rebase conflicts there).
 Keep the upstream diff small and rebase-friendly; add rather than rewrite.
 
 > `README*.md` and `docs/` are upstream-authored (`kite.zzde.me`). Trust this
@@ -89,6 +92,11 @@ Minimum per component: backend `go vet ./... && golangci-lint run && go test
   `KITE_BASE`, `AUTH_PROXY_*`, `ANONYMOUS_USER_ENABLED`). Read the `common`
   package vars, not scattered `os.Getenv`. Exception: `pkg/tracing` lets the
   OTel SDK read the standard `OTEL_*` env itself; no OTLP endpoint = tracing off.
+- **Model functions take `ctx` first**: handlers pass `c.Request.Context()`,
+  startup/background `context.Background()`, writes that must finish after a
+  client disconnect (history, login upserts) `context.WithoutCancel(ctx)`. Gin
+  `ContextWithFallback` is on, so `c` is a valid context — but never use `c` in
+  a goroutine outliving the handler (`c.Copy()` + `context.WithoutCancel`).
 - **Clusters** persist in the DB (`pkg/cluster/cluster_manager.go`); a request
   selects one via the `x-cluster-name` header (`ClusterMiddleware`).
 - **Auth**: JWT in an httpOnly cookie + refresh; password / OAuth / API-key /
@@ -154,7 +162,9 @@ Check the other side before declaring done. Siblings are `../<repo>` checkouts
   assumes Authentik group names.
 - **Upstream `zxh326/kite`** — fork-only backend code stays isolated to
   `pkg/auth/handler.go`, `pkg/common/common.go`, `pkg/model/user.go` and
-  `pkg/tracing/` (+ its hooks in `main.go`, `cluster_manager.go`); most fork
+  `pkg/tracing/` (+ one-line hooks in `main.go`, `cluster_manager.go`,
+  `pkg/kube/client.go`, `pkg/prometheus/client.go`, the Describe handlers); the
+  `ctx`-first `pkg/model` signatures touch many upstream callers. Most fork
   features are frontend-only on the generic API.
 
 ## When stuck

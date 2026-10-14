@@ -25,7 +25,7 @@ pkg/
 ├── model/                    # GORM models + InitDB (AutoMigrate); user/cluster/oauth/role/template/history
 ├── middleware/               # auth, cluster (x-cluster-name), cors, logger, metrics, rbac
 ├── common/                   # config vars + LoadEnvs(); shared types; rbac constants
-├── tracing/                  # (fork) OTel: Init, gin middleware, WrapTransport
+├── tracing/                  # (fork) OTel: server, HTTP transport, k8s, GORM, Prometheus, describe
 ├── prometheus/ appview/ version/ utils/
 ```
 
@@ -37,8 +37,8 @@ Global: `tracing (if enabled) → Metrics → gzip(opt) → Recovery → Logger 
 completes); **Admin** `/api/v1/admin` = `RequireAuth()` + `RequireAdmin()`;
 **Protected** `/api/v1` = `RequireAuth()` + `ClusterMiddleware(cm)`, resource
 routes add `RBACMiddleware()` before `resources.RegisterRoutes(api)`.
-Outbound k8s/Prometheus client spans need a parent span in the request
-context (no orphan informer traces); upgrade/exec/WebSocket requests are skipped.
+Inner-layer spans (k8s, GORM, Prometheus, describe) exist only under a request
+span (no orphan informer traces); upgrade/exec/WS are skipped.
 
 ## The resource handler pattern (most important)
 
@@ -87,6 +87,8 @@ controller-runtime client).
 template, resource_history). New persisted entity → add the struct + include it
 in the `AutoMigrate` list in `pkg/model/model.go`. Secrets (e.g. kubeconfig,
 oauth client secret) are encrypted with `KITE_ENCRYPT_KEY` (`custom_type.go`).
+Model funcs take `ctx` first; `tracing.InstrumentDB` spans each statement
+with placeholder SQL only.
 
 ## Conventions & quality gate
 

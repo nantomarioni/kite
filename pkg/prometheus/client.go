@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"github.com/zxh326/kite/pkg/tracing"
 	"k8s.io/klog/v2"
 )
 
@@ -70,7 +71,7 @@ func NewClientWithRoundTripper(prometheusURL string, rt http.RoundTripper) (*Cli
 		return nil, fmt.Errorf("error creating prometheus client: %w", err)
 	}
 
-	v1api := v1.NewAPI(client)
+	v1api := tracing.WrapPrometheusAPI(v1.NewAPI(client))
 	return &Client{
 		client: v1api,
 	}, nil

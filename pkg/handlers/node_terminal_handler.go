@@ -49,7 +49,7 @@ func (h *NodeTerminalHandler) HandleNodeTerminalWebSocket(c *gin.Context) {
 			h.sendErrorMessage(conn, rbac.NoAccess(user.Key(), string(common.VerbExec), "nodes", "", cs.Name))
 			return
 		}
-		node, err := cs.K8sClient.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		node, err := cs.K8sClient.ClientSet.CoreV1().Nodes().Get(c.Request.Context(), nodeName, metav1.GetOptions{})
 		if err != nil {
 			log.Printf("Failed to get node %s: %v", nodeName, err)
 			h.sendErrorMessage(conn, fmt.Sprintf("Failed to get node %s: %v", nodeName, err))
@@ -185,7 +185,7 @@ func (h *NodeTerminalHandler) waitForPodReady(ctx context.Context, cs *cluster.C
 			return fmt.Errorf("timeout waiting for pod %s to be ready", podName)
 		case <-ticker.C:
 			pod, err = cs.K8sClient.ClientSet.CoreV1().Pods("kube-system").Get(
-				context.TODO(),
+				ctx,
 				podName,
 				metav1.GetOptions{},
 			)

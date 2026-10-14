@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,7 +12,7 @@ import (
 )
 
 func (h *AuthHandler) ListOAuthProviders(c *gin.Context) {
-	providers, err := model.GetAllOAuthProviders()
+	providers, err := model.GetAllOAuthProviders(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to retrieve OAuth providers",
@@ -57,7 +58,7 @@ func (h *AuthHandler) CreateOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	if err := model.CreateOAuthProvider(&provider); err != nil {
+	if err := model.CreateOAuthProvider(context.WithoutCancel(c.Request.Context()), &provider); err != nil {
 		if errors.Is(err, model.ErrReservedOAuthProviderName) {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -131,7 +132,7 @@ func (h *AuthHandler) UpdateOAuthProvider(c *gin.Context) {
 		updates["client_secret"] = provider.ClientSecret
 	}
 
-	if err := model.UpdateOAuthProvider(&provider, updates); err != nil {
+	if err := model.UpdateOAuthProvider(context.WithoutCancel(c.Request.Context()), &provider, updates); err != nil {
 		if errors.Is(err, model.ErrReservedOAuthProviderName) {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -164,7 +165,7 @@ func (h *AuthHandler) DeleteOAuthProvider(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteOAuthProvider(uint(dbID)); err != nil {
+	if err := model.DeleteOAuthProvider(context.WithoutCancel(c.Request.Context()), uint(dbID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to delete OAuth provider: " + err.Error(),
 		})

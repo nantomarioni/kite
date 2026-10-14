@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -137,7 +138,7 @@ func TestLoadConfigFromFile_EndToEnd(t *testing.T) { //nolint:gocyclo // end-to-
 	t.Cleanup(func() { rbac.SyncNow = oldSyncNow })
 
 	// Create system roles first (normally done by InitRBAC)
-	if err := model.InitDefaultRole(); err != nil {
+	if err := model.InitDefaultRole(context.Background()); err != nil {
 		t.Fatalf("InitDefaultRole: %v", err)
 	}
 
@@ -162,7 +163,7 @@ func TestLoadConfigFromFile_EndToEnd(t *testing.T) { //nolint:gocyclo // end-to-
 
 	// --- Verify clusters ---
 	t.Run("Clusters", func(t *testing.T) {
-		clusters, err := model.ListClusters()
+		clusters, err := model.ListClusters(context.Background())
 		if err != nil {
 			t.Fatalf("ListClusters: %v", err)
 		}
@@ -200,7 +201,7 @@ func TestLoadConfigFromFile_EndToEnd(t *testing.T) { //nolint:gocyclo // end-to-
 
 	// --- Verify OAuth ---
 	t.Run("OAuth", func(t *testing.T) {
-		providers, err := model.GetAllOAuthProviders()
+		providers, err := model.GetAllOAuthProviders(context.Background())
 		if err != nil {
 			t.Fatalf("GetAllOAuthProviders: %v", err)
 		}
@@ -320,7 +321,7 @@ func TestLoadConfigFromFile_EnvExpansion(t *testing.T) {
 
 	LoadConfigFromFile(configPath)
 
-	providers, err := model.GetAllOAuthProviders()
+	providers, err := model.GetAllOAuthProviders(context.Background())
 	if err != nil {
 		t.Fatalf("GetAllOAuthProviders: %v", err)
 	}
@@ -384,7 +385,7 @@ func TestLoadConfigFromFile_StartupOverwrite(t *testing.T) {
 		InCluster: true,
 		Enable:    true,
 	}
-	if err := model.AddCluster(existing); err != nil {
+	if err := model.AddCluster(context.Background(), existing); err != nil {
 		t.Fatalf("AddCluster: %v", err)
 	}
 
@@ -400,7 +401,7 @@ func TestLoadConfigFromFile_StartupOverwrite(t *testing.T) {
 
 	LoadConfigFromFile(configPath)
 
-	clusters, _ := model.ListClusters()
+	clusters, _ := model.ListClusters(context.Background())
 	if len(clusters) != 1 {
 		t.Fatalf("expected 1 cluster after overwrite, got %d", len(clusters))
 	}
@@ -422,10 +423,10 @@ func TestBootstrapWithManagedClusters(t *testing.T) {
 	t.Cleanup(func() { rbac.SyncNow = oldSyncNow })
 
 	// Create a user so bootstrap considers step 1 (user) done
-	if err := model.InitDefaultRole(); err != nil {
+	if err := model.InitDefaultRole(context.Background()); err != nil {
 		t.Fatalf("InitDefaultRole: %v", err)
 	}
-	if err := model.AddSuperUser(&model.User{Username: "admin", Password: "pass"}); err != nil {
+	if err := model.AddSuperUser(context.Background(), &model.User{Username: "admin", Password: "pass"}); err != nil {
 		t.Fatalf("AddSuperUser: %v", err)
 	}
 
@@ -508,7 +509,7 @@ func TestLoadConfigFromFile_SuperUser(t *testing.T) {
 	t.Cleanup(func() { rbac.SyncNow = oldSyncNow })
 
 	// Create system roles (needed for AddSuperUser -> AddRoleAssignment)
-	if err := model.InitDefaultRole(); err != nil {
+	if err := model.InitDefaultRole(context.Background()); err != nil {
 		t.Fatalf("InitDefaultRole: %v", err)
 	}
 
@@ -528,12 +529,12 @@ clusters:
 	LoadConfigFromFile(configPath)
 
 	// Verify super user was created
-	uc, _ := model.CountUsers()
+	uc, _ := model.CountUsers(context.Background())
 	if uc != 1 {
 		t.Fatalf("expected 1 user, got %d", uc)
 	}
 
-	user, err := model.GetUserByUsername("testadmin")
+	user, err := model.GetUserByUsername(context.Background(), "testadmin")
 	if err != nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -551,7 +552,7 @@ func TestLoadConfigFromFile_SuperUserUpdatesPassword(t *testing.T) {
 	rbac.SyncNow = make(chan struct{}, 10)
 	t.Cleanup(func() { rbac.SyncNow = oldSyncNow })
 
-	if err := model.InitDefaultRole(); err != nil {
+	if err := model.InitDefaultRole(context.Background()); err != nil {
 		t.Fatalf("InitDefaultRole: %v", err)
 	}
 
@@ -578,13 +579,13 @@ func TestLoadConfigFromFile_SuperUserUpdatesPassword(t *testing.T) {
 	LoadConfigFromFile(configPath)
 
 	// Should still be only 1 user
-	uc, _ := model.CountUsers()
+	uc, _ := model.CountUsers(context.Background())
 	if uc != 1 {
 		t.Fatalf("expected 1 user, got %d", uc)
 	}
 
 	// Verify the password was updated (can login with new password)
-	user, err := model.GetUserByUsername("myadmin")
+	user, err := model.GetUserByUsername(context.Background(), "myadmin")
 	if err != nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -603,7 +604,7 @@ func TestLoadConfigFromFile_SuperUserWithRBAC(t *testing.T) {
 	rbac.SyncNow = make(chan struct{}, 10)
 	t.Cleanup(func() { rbac.SyncNow = oldSyncNow })
 
-	if err := model.InitDefaultRole(); err != nil {
+	if err := model.InitDefaultRole(context.Background()); err != nil {
 		t.Fatalf("InitDefaultRole: %v", err)
 	}
 
@@ -638,7 +639,7 @@ rbac:
 	LoadConfigFromFile(configPath)
 
 	// Verify the super user was created
-	user, err := model.GetUserByUsername("myadmin")
+	user, err := model.GetUserByUsername(context.Background(), "myadmin")
 	if err != nil {
 		t.Fatalf("GetUserByUsername: %v", err)
 	}
@@ -648,7 +649,7 @@ rbac:
 
 	// Verify the super user has the admin role assignment
 	// (superUser is applied AFTER RBAC, so it shouldn't be wiped)
-	adminRole, err := model.GetRoleByName("admin")
+	adminRole, err := model.GetRoleByName(context.Background(), "admin")
 	if err != nil {
 		t.Fatalf("GetRoleByName(admin): %v", err)
 	}

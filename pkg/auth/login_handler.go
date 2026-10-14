@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -68,7 +69,7 @@ func (h *AuthHandler) CreateSuperUser(c *gin.Context) {
 		return
 	}
 
-	uc, err := model.CountUsers()
+	uc, err := model.CountUsers(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count users"})
 		return
@@ -85,7 +86,7 @@ func (h *AuthHandler) CreateSuperUser(c *gin.Context) {
 		Provider: "password",
 	}
 
-	if err := model.AddSuperUser(user); err != nil {
+	if err := model.AddSuperUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create super user"})
 		return
 	}
@@ -161,7 +162,7 @@ func (h *AuthHandler) handleCredentialLogin(c *gin.Context, provider string, aut
 		return
 	}
 
-	user, err := authenticate(username, req.Password)
+	user, err := authenticate(c.Request.Context(), username, req.Password)
 	if err != nil {
 		errMsg := fmt.Sprintf("%s login failed for %s: %v", strings.ToUpper(provider), username, err)
 		if isCredentialFailure(err) {
@@ -217,7 +218,7 @@ func (h *AuthHandler) completePasswordLikeLogin(c *gin.Context, user *model.User
 		return
 	}
 
-	if err := model.LoginUser(user); err != nil {
+	if err := model.LoginUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed login"})
 		return
 	}
@@ -233,7 +234,7 @@ func (h *AuthHandler) completePasswordLikeLogin(c *gin.Context, user *model.User
 	c.Status(http.StatusNoContent)
 }
 
-func (h *AuthHandler) authenticateAndSyncLDAPUser(username, password string) (*model.User, error) {
+func (h *AuthHandler) authenticateAndSyncLDAPUser(ctx context.Context, username, password string) (*model.User, error) {
 	setting, err := model.GetLDAPSetting()
 	if err != nil {
 		return nil, err
@@ -244,7 +245,7 @@ func (h *AuthHandler) authenticateAndSyncLDAPUser(username, password string) (*m
 		return nil, err
 	}
 
-	syncedUser, err := model.UpsertLDAPUser(ldapUser)
+	syncedUser, err := model.UpsertLDAPUser(ctx, ldapUser)
 	if err != nil {
 		if errors.Is(err, model.ErrUserProviderConflict) {
 			return nil, ErrLDAPInvalidCredentials
@@ -255,8 +256,8 @@ func (h *AuthHandler) authenticateAndSyncLDAPUser(username, password string) (*m
 	return syncedUser, nil
 }
 
-func (h *AuthHandler) authenticatePasswordUser(username, password string) (*model.User, error) {
-	user, err := model.GetUserByUsername(username)
+func (h *AuthHandler) authenticatePasswordUser(ctx context.Context, username, password string) (*model.User, error) {
+	user, err := model.GetUserByUsername(ctx, username)
 	switch {
 	case err == nil:
 		if user.Provider != "" && user.Provider != model.AuthProviderPassword {
@@ -337,7 +338,7 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	if err := model.FindWithSubOrUpsertUser(user); err != nil {
+	if err := model.FindWithSubOrUpsertUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.Redirect(http.StatusFound, base+"/login?error=user_upsert_failed&reason=user_upsert_failed&provider="+provider)
 		return
 	}

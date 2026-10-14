@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -49,18 +50,18 @@ func (u *User) GetAPIKey() string {
 	return fmt.Sprintf("kite%d-%s", u.ID, string(u.APIKey))
 }
 
-func AddUser(user *User) error {
+func AddUser(ctx context.Context, user *User) error {
 	// Hash the password before storing it
 	hash, err := utils.HashPassword(user.Password)
 	if err != nil {
 		return err
 	}
 	user.Password = hash
-	return DB.Create(user).Error
+	return DB.WithContext(ctx).Create(user).Error
 }
 
-func CountUsers() (count int64, err error) {
-	return count, DB.Model(&User{}).Count(&count).Error
+func CountUsers(ctx context.Context) (count int64, err error) {
+	return count, DB.WithContext(ctx).Model(&User{}).Count(&count).Error
 }
 
 // userCache is a thread-safe LRU with 30s TTL.
@@ -70,14 +71,14 @@ var userCache = expirable.NewLRU[uint64, *User](256, nil, 30*time.Second)
 
 // GetUserByIDCached returns the user from cache if available, otherwise
 // fetches from DB and stores it.  Used on the hot auth path.
-func GetUserByIDCached(id uint64) (*User, error) {
+func GetUserByIDCached(ctx context.Context, id uint64) (*User, error) {
 	if u, ok := userCache.Get(id); ok {
 		// Return a shallow copy so callers (RequireAuth, etc.) can safely
 		// mutate fields like Roles without racing on the cached pointer.
 		copy := *u
 		return &copy, nil
 	}
-	u, err := GetUserByID(id)
+	u, err := GetUserByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -94,32 +95,32 @@ func InvalidateUserCache(id uint64) {
 	userCache.Remove(id)
 }
 
-func GetUserByID(id uint64) (*User, error) {
+func GetUserByID(ctx context.Context, id uint64) (*User, error) {
 	var user User
-	if err := DB.Where("id = ?", id).First(&user).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("id = ?", id).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
 }
 
-func GetAnonymousUser() *User {
+func GetAnonymousUser(ctx context.Context) *User {
 	user := &User{}
-	if err := DB.Where("username = ? AND provider = ?", "anonymous", "Anonymous").First(user).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("username = ? AND provider = ?", "anonymous", "Anonymous").First(user).Error; err != nil {
 		return nil
 	}
 	return user
 }
 
-func FindWithSubOrUpsertUser(user *User) error {
+func FindWithSubOrUpsertUser(ctx context.Context, user *User) error {
 	if user.Sub == "" {
 		return errors.New("user sub is empty")
 	}
 	var existingUser User
 	now := time.Now()
 	user.LastLoginAt = &now
-	if err := DB.Where("sub = ?", user.Sub).First(&existingUser).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("sub = ?", user.Sub).First(&existingUser).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return DB.Create(user).Error
+			return DB.WithContext(ctx).Create(user).Error
 		}
 		return err
 	}
@@ -128,25 +129,25 @@ func FindWithSubOrUpsertUser(user *User) error {
 	user.ID = existingUser.ID
 	user.CreatedAt = existingUser.CreatedAt
 	user.SidebarPreference = existingUser.SidebarPreference
-	err := DB.Save(user).Error
+	err := DB.WithContext(ctx).Save(user).Error
 	InvalidateUserCache(uint64(user.ID))
 	return err
 }
 
-func GetUserByUsername(username string) (*User, error) {
+func GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	var user User
-	if err := DB.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("username = ?", username).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
 }
 
 // ListUsers returns users with pagination. If limit is 0, defaults to 20.
-func ListUsers(limit int, offset int, search string, sortBy string, sortOrder string, role string) (users []User, total int64, err error) {
+func ListUsers(ctx context.Context, limit int, offset int, search string, sortBy string, sortOrder string, role string) (users []User, total int64, err error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	query := DB.Model(&User{}).Where("users.provider != ?", common.APIKeyProvider)
+	query := DB.WithContext(ctx).Model(&User{}).Where("users.provider != ?", common.APIKeyProvider)
 	if role != "" {
 		query = query.Joins(
 			"JOIN role_assignments ra ON ra.subject = users.username AND ra.subject_type = ?",
@@ -162,7 +163,7 @@ func ListUsers(limit int, offset int, search string, sortBy string, sortOrder st
 		)
 	}
 	countQuery := query.Select("users.id").Distinct("users.id")
-	err = DB.Table("(?) as sub", countQuery).Count(&total).Error
+	err = DB.WithContext(ctx).Table("(?) as sub", countQuery).Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -193,7 +194,7 @@ func ListUsers(limit int, offset int, search string, sortBy string, sortOrder st
 	if err != nil {
 		return nil, 0, err
 	}
-	err = DB.
+	err = DB.WithContext(ctx).
 		Where("id IN (?)", userIds).
 		Order(orderExpr).
 		Find(&users).Error
@@ -203,18 +204,18 @@ func ListUsers(limit int, offset int, search string, sortBy string, sortOrder st
 	return users, total, nil
 }
 
-func LoginUser(u *User) error {
+func LoginUser(ctx context.Context, u *User) error {
 	now := time.Now()
 	u.LastLoginAt = &now
-	err := DB.Model(&User{}).Where("id = ? AND enabled = ?", u.ID, true).Update("last_login_at", now).Error
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ? AND enabled = ?", u.ID, true).Update("last_login_at", now).Error
 	InvalidateUserCache(uint64(u.ID))
 	return err
 }
 
 // DeleteUserByID removes a user by ID
-func DeleteUserByID(id uint) error {
-	_ = DB.Where("operator_id = ?", id).Delete(&ResourceHistory{}).Error
-	err := DB.Transaction(func(tx *gorm.DB) error {
+func DeleteUserByID(ctx context.Context, id uint) error {
+	_ = DB.WithContext(ctx).Where("operator_id = ?", id).Delete(&ResourceHistory{}).Error
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := tx.Select("username").First(&user, id).Error; err != nil {
 			return err
@@ -229,16 +230,16 @@ func DeleteUserByID(id uint) error {
 }
 
 // UpdateUser saves provided user (expects ID set)
-func UpdateUser(user *User) error {
-	err := DB.Save(user).Error
+func UpdateUser(ctx context.Context, user *User) error {
+	err := DB.WithContext(ctx).Save(user).Error
 	InvalidateUserCache(uint64(user.ID))
 	return err
 }
 
 // ResetPasswordByID sets a new password (hashed) for user with given id
-func ResetPasswordByID(id uint, plainPassword string) error {
+func ResetPasswordByID(ctx context.Context, id uint, plainPassword string) error {
 	var u User
-	if err := DB.First(&u, id).Error; err != nil {
+	if err := DB.WithContext(ctx).First(&u, id).Error; err != nil {
 		return err
 	}
 	hash, err := utils.HashPassword(plainPassword)
@@ -246,28 +247,28 @@ func ResetPasswordByID(id uint, plainPassword string) error {
 		return err
 	}
 	u.Password = hash
-	err = DB.Save(&u).Error
+	err = DB.WithContext(ctx).Save(&u).Error
 	InvalidateUserCache(uint64(id))
 	return err
 }
 
 // SetUserEnabled sets enabled flag for a user
-func SetUserEnabled(id uint, enabled bool) error {
-	err := DB.Model(&User{}).Where("id = ?", id).Update("enabled", enabled).Error
+func SetUserEnabled(ctx context.Context, id uint, enabled bool) error {
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("enabled", enabled).Error
 	InvalidateUserCache(uint64(id))
 	return err
 }
 
 // UpdateUserName updates only the display name of a user.
-func UpdateUserName(id uint, name string) error {
-	err := DB.Model(&User{}).Where("id = ?", id).Update("name", name).Error
+func UpdateUserName(ctx context.Context, id uint, name string) error {
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("name", name).Error
 	InvalidateUserCache(uint64(id))
 	return err
 }
 
 // StoreMFASecret persists a pending MFA secret without enabling MFA yet.
-func StoreMFASecret(id uint, secret string) error {
-	err := DB.Model(&User{}).Where("id = ?", id).Updates(map[string]any{
+func StoreMFASecret(ctx context.Context, id uint, secret string) error {
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(map[string]any{
 		"mfa_secret":  SecretString(secret),
 		"mfa_enabled": false,
 	}).Error
@@ -276,15 +277,15 @@ func StoreMFASecret(id uint, secret string) error {
 }
 
 // EnableUserMFA marks MFA as active for the given user (secret must already be stored).
-func EnableUserMFA(id uint) error {
-	err := DB.Model(&User{}).Where("id = ?", id).Update("mfa_enabled", true).Error
+func EnableUserMFA(ctx context.Context, id uint) error {
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ?", id).Update("mfa_enabled", true).Error
 	InvalidateUserCache(uint64(id))
 	return err
 }
 
 // DisableUserMFA clears MFA for the given user.
-func DisableUserMFA(id uint) error {
-	err := DB.Model(&User{}).Where("id = ?", id).Updates(map[string]any{
+func DisableUserMFA(ctx context.Context, id uint) error {
+	err := DB.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(map[string]any{
 		"mfa_enabled": false,
 		"mfa_secret":  "",
 	}).Error
@@ -296,7 +297,7 @@ func CheckPassword(hashedPassword, plainPassword string) bool {
 	return utils.CheckPasswordHash(plainPassword, hashedPassword)
 }
 
-func UpsertLDAPUser(user *User) (*User, error) {
+func UpsertLDAPUser(ctx context.Context, user *User) (*User, error) {
 	if user == nil {
 		return nil, errors.New("user is nil")
 	}
@@ -312,13 +313,13 @@ func UpsertLDAPUser(user *User) (*User, error) {
 	user.LastLoginAt = &now
 
 	var existingUser User
-	if err := DB.Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			user.Enabled = true
 			if strings.TrimSpace(user.Name) == "" {
 				user.Name = user.Username
 			}
-			err = DB.Create(user).Error
+			err = DB.WithContext(ctx).Create(user).Error
 			if err == nil {
 				InvalidateUserCache(uint64(user.ID))
 				return user, nil
@@ -326,7 +327,7 @@ func UpsertLDAPUser(user *User) (*User, error) {
 			if !isUniqueConstraintError(err) {
 				return nil, err
 			}
-			if err := DB.Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
+			if err := DB.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
 				return nil, err
 			}
 		} else {
@@ -350,7 +351,7 @@ func UpsertLDAPUser(user *User) (*User, error) {
 		user.AvatarURL = existingUser.AvatarURL
 	}
 
-	err := DB.Save(user).Error
+	err := DB.WithContext(ctx).Save(user).Error
 	if err == nil {
 		InvalidateUserCache(uint64(user.ID))
 	}
@@ -370,37 +371,37 @@ func isUniqueConstraintError(err error) bool {
 		strings.Contains(message, "duplicate entry")
 }
 
-func AddSuperUser(user *User) error {
+func AddSuperUser(ctx context.Context, user *User) error {
 	if user == nil {
 		return errors.New("user is nil")
 	}
-	if err := AddUser(user); err != nil {
+	if err := AddUser(ctx, user); err != nil {
 		return err
 	}
-	if err := AddRoleAssignment("admin", SubjectTypeUser, user.Username); err != nil {
+	if err := AddRoleAssignment(ctx, "admin", SubjectTypeUser, user.Username); err != nil {
 		return err
 	}
 	return nil
 }
 
-func NewAPIKeyUser(name string) (*User, error) {
+func NewAPIKeyUser(ctx context.Context, name string) (*User, error) {
 	apiKey := utils.RandomString(32)
 	u := &User{
 		Username: name,
 		APIKey:   SecretString(apiKey),
 		Provider: common.APIKeyProvider,
 	}
-	return u, DB.Save(u).Error
+	return u, DB.WithContext(ctx).Save(u).Error
 }
 
-func ListAPIKeyUsers() (users []User, err error) {
-	err = DB.Order("id desc").Where("provider = ?", common.APIKeyProvider).Find(&users).Error
+func ListAPIKeyUsers(ctx context.Context) (users []User, err error) {
+	err = DB.WithContext(ctx).Order("id desc").Where("provider = ?", common.APIKeyProvider).Find(&users).Error
 	return users, err
 }
 
 // FindOrCreateAuthProxyUser finds or creates a user from auth proxy headers.
 // Uses uid (stored in Sub field) as the unique identifier.
-func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []string) (*User, error) {
+func FindOrCreateAuthProxyUser(ctx context.Context, uid, username, name, email string, groups []string) (*User, error) {
 	if uid == "" {
 		return nil, errors.New("auth proxy uid is empty")
 	}
@@ -408,7 +409,7 @@ func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []strin
 	var existingUser User
 	now := time.Now()
 
-	if err := DB.Where("sub = ?", uid).First(&existingUser).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("sub = ?", uid).First(&existingUser).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Create new user
 			newUser := &User{
@@ -420,7 +421,7 @@ func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []strin
 				Enabled:     true,
 				LastLoginAt: &now,
 			}
-			if err := DB.Create(newUser).Error; err != nil {
+			if err := DB.WithContext(ctx).Create(newUser).Error; err != nil {
 				return nil, err
 			}
 			return newUser, nil
@@ -433,7 +434,7 @@ func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []strin
 	existingUser.Name = name
 	existingUser.OIDCGroups = groups
 	existingUser.LastLoginAt = &now
-	if err := DB.Save(&existingUser).Error; err != nil {
+	if err := DB.WithContext(ctx).Save(&existingUser).Error; err != nil {
 		return nil, err
 	}
 	InvalidateUserCache(uint64(existingUser.ID))

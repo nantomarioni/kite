@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -52,7 +53,7 @@ func TestPasswordLoginSessionIsRevokedWhenUserIsDisabled(t *testing.T) {
 	if err != nil || claims.UserID != user.ID {
 		t.Fatalf("ValidateJWT() claims = %#v, error = %v", claims, err)
 	}
-	stored, err := model.GetUserByID(uint64(user.ID))
+	stored, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil || stored.LastLoginAt == nil {
 		t.Fatalf("successful login did not update LastLoginAt: user=%#v err=%v", stored, err)
 	}
@@ -61,7 +62,7 @@ func TestPasswordLoginSessionIsRevokedWhenUserIsDisabled(t *testing.T) {
 	if protected.Code != http.StatusOK {
 		t.Fatalf("protected status = %d, want %d: %s", protected.Code, http.StatusOK, protected.Body.String())
 	}
-	if err := model.SetUserEnabled(user.ID, false); err != nil {
+	if err := model.SetUserEnabled(context.Background(), user.ID, false); err != nil {
 		t.Fatalf("disabling user: %v", err)
 	}
 	revoked := performAuthRequest(router, http.MethodGet, "/protected", "", authCookie)
@@ -73,10 +74,10 @@ func TestPasswordLoginSessionIsRevokedWhenUserIsDisabled(t *testing.T) {
 func TestPasswordLoginHonorsMFAAndGlobalDisable(t *testing.T) {
 	t.Run("MFA code required", func(t *testing.T) {
 		user := setupAuthIntegrationDB(t)
-		if err := model.StoreMFASecret(user.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"); err != nil {
+		if err := model.StoreMFASecret(context.Background(), user.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"); err != nil {
 			t.Fatalf("storing MFA secret: %v", err)
 		}
-		if err := model.EnableUserMFA(user.ID); err != nil {
+		if err := model.EnableUserMFA(context.Background(), user.ID); err != nil {
 			t.Fatalf("enabling MFA: %v", err)
 		}
 		handler := NewAuthHandler()
@@ -160,7 +161,7 @@ func setupAuthIntegrationDB(t *testing.T) *model.User {
 		t.Fatalf("creating general setting: %v", err)
 	}
 	user := &model.User{Username: "alice", Password: "correct-password", Provider: model.AuthProviderPassword, Enabled: true}
-	if err := model.AddUser(user); err != nil {
+	if err := model.AddUser(context.Background(), user); err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 	model.InvalidateUserCache(uint64(user.ID))

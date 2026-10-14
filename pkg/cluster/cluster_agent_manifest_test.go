@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +32,7 @@ func TestGetClusterAgentManifest(t *testing.T) {
 		ClusterAgentPublicKey:  publicKey,
 		ClusterAgentPrivateKey: model.SecretString(privateKey),
 	}
-	if err := model.AddCluster(cluster); err != nil {
+	if err := model.AddCluster(context.Background(), cluster); err != nil {
 		t.Fatalf("adding cluster: %v", err)
 	}
 
@@ -115,10 +116,10 @@ func TestGetClusterAgentManifestDisabledCluster(t *testing.T) {
 		Enable:                true,
 		ClusterAgentTokenHash: hash,
 	}
-	if err := model.AddCluster(cluster); err != nil {
+	if err := model.AddCluster(context.Background(), cluster); err != nil {
 		t.Fatalf("adding cluster: %v", err)
 	}
-	if err := model.UpdateCluster(cluster, map[string]interface{}{"enable": false}); err != nil {
+	if err := model.UpdateCluster(context.Background(), cluster, map[string]interface{}{"enable": false}); err != nil {
 		t.Fatalf("disabling cluster: %v", err)
 	}
 
@@ -176,7 +177,7 @@ func TestCreateClusterAgentClusterReturnsConnectionInfo(t *testing.T) {
 		t.Errorf("manifestURL %q should contain a manifest grant", manifestURL)
 	}
 	// Verify the cluster was persisted correctly.
-	cluster, err := model.GetClusterByName("agent-test")
+	cluster, err := model.GetClusterByName(context.Background(), "agent-test")
 	if err != nil {
 		t.Fatalf("loading cluster: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestCreateClusterAgentClusterIgnoresKubeconfig(t *testing.T) {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusCreated, rec.Body.String())
 	}
 
-	cluster, err := model.GetClusterByName("agent-ignore")
+	cluster, err := model.GetClusterByName(context.Background(), "agent-ignore")
 	if err != nil {
 		t.Fatalf("loading cluster: %v", err)
 	}

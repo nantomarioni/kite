@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -33,13 +34,13 @@ func CreatePasswordUser(c *gin.Context) {
 		Provider: "password",
 	}
 
-	_, err := model.GetUserByUsername(user.Username)
+	_, err := model.GetUserByUsername(c.Request.Context(), user.Username)
 	if err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "user already exists"})
 		return
 	}
 
-	if err := model.AddUser(user); err != nil {
+	if err := model.AddUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 		return
 	}
@@ -71,6 +72,7 @@ func ListUsers(c *gin.Context) {
 	offset := (page - 1) * size
 
 	users, total, err := model.ListUsers(
+		c.Request.Context(),
 		size,
 		offset,
 		search,
@@ -104,7 +106,7 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	user, err := model.GetUserByID(id)
+	user, err := model.GetUserByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
@@ -116,7 +118,7 @@ func UpdateUser(c *gin.Context) {
 		user.AvatarURL = req.AvatarURL
 	}
 
-	if err := model.UpdateUser(user); err != nil {
+	if err := model.UpdateUser(context.WithoutCancel(c.Request.Context()), user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
 		return
 	}
@@ -139,7 +141,7 @@ func UpdateCurrentUser(c *gin.Context) {
 	}
 
 	name := strings.TrimSpace(req.Name)
-	if err := model.UpdateUserName(user.ID, name); err != nil {
+	if err := model.UpdateUserName(context.WithoutCancel(c.Request.Context()), user.ID, name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
 		return
 	}
@@ -166,7 +168,7 @@ func ChangeCurrentUserPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "current password is incorrect"})
 		return
 	}
-	if err := model.ResetPasswordByID(user.ID, req.NewPassword); err != nil {
+	if err := model.ResetPasswordByID(c.Request.Context(), user.ID, req.NewPassword); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to change password"})
 		return
 	}
@@ -203,7 +205,7 @@ func SetupCurrentUserMFA(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate mfa secret"})
 		return
 	}
-	if err := model.StoreMFASecret(user.ID, secret); err != nil {
+	if err := model.StoreMFASecret(context.WithoutCancel(c.Request.Context()), user.ID, secret); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save mfa secret"})
 		return
 	}
@@ -247,7 +249,7 @@ func EnableCurrentUserMFA(c *gin.Context) {
 		return
 	}
 
-	if err := model.EnableUserMFA(user.ID); err != nil {
+	if err := model.EnableUserMFA(context.WithoutCancel(c.Request.Context()), user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enable mfa"})
 		return
 	}
@@ -281,7 +283,7 @@ func DisableCurrentUserMFA(c *gin.Context) {
 		return
 	}
 
-	if err := model.DisableUserMFA(user.ID); err != nil {
+	if err := model.DisableUserMFA(context.WithoutCancel(c.Request.Context()), user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to disable mfa"})
 		return
 	}
@@ -417,7 +419,7 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteUserByID(id); err != nil {
+	if err := model.DeleteUserByID(context.WithoutCancel(c.Request.Context()), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
 		return
 	}
@@ -437,7 +439,7 @@ func ResetPassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := model.ResetPasswordByID(id, req.Password); err != nil {
+	if err := model.ResetPasswordByID(c.Request.Context(), id, req.Password); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
@@ -457,7 +459,7 @@ func SetUserEnabled(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := model.SetUserEnabled(id, req.Enabled); err != nil {
+	if err := model.SetUserEnabled(c.Request.Context(), id, req.Enabled); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set enabled"})
 		return
 	}
@@ -486,7 +488,7 @@ func UpdateSidebarPreference(c *gin.Context) {
 		return
 	}
 	user.SidebarPreference = req.SidebarPreference
-	if err := model.UpdateUser(&user); err != nil {
+	if err := model.UpdateUser(context.WithoutCancel(c.Request.Context()), &user); err != nil {
 		klog.Errorf("failed to update sidebar preference for user %s: %v", user.Username, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update sidebar preference"})
 		return

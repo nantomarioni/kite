@@ -1,6 +1,7 @@
 package passkey
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,16 +46,16 @@ func TestCredentialPersistenceEnforcesUserBinding(t *testing.T) {
 		t.Fatalf("stored WebAuthn credentials = %#v", webUser.credentials)
 	}
 
-	resolved, resolvedRecord, err := userForCredential(credential.ID, userHandle(alice.ID))
+	resolved, resolvedRecord, err := userForCredential(context.Background(), credential.ID, userHandle(alice.ID))
 	if err != nil {
-		t.Fatalf("userForCredential() error = %v", err)
+		t.Fatalf("userForCredential(context.Background(), ) error = %v", err)
 	}
 	resolvedUser, ok := resolved.(webAuthnUser)
 	if !ok || resolvedUser.user.ID != alice.ID || resolvedRecord.ID != record.ID {
 		t.Fatalf("resolved credential owner = %#v, record = %#v", resolved, resolvedRecord)
 	}
-	if _, _, err := userForCredential(credential.ID, userHandle(bob.ID)); err == nil {
-		t.Fatal("userForCredential() accepted another user's handle")
+	if _, _, err := userForCredential(context.Background(), credential.ID, userHandle(bob.ID)); err == nil {
+		t.Fatal("userForCredential(context.Background(), ) accepted another user's handle")
 	}
 
 	credential.Authenticator.SignCount = 7

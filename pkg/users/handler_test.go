@@ -1,6 +1,7 @@
 package users
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base32"
@@ -33,7 +34,7 @@ func TestChangeCurrentUserPasswordVerifiesCurrentPassword(t *testing.T) {
 	if wrong.Code != http.StatusBadRequest {
 		t.Fatalf("wrong-password status = %d, want %d", wrong.Code, http.StatusBadRequest)
 	}
-	stored, err := model.GetUserByID(uint64(user.ID))
+	stored, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading user after rejected change: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestChangeCurrentUserPasswordVerifiesCurrentPassword(t *testing.T) {
 	if success.Code != http.StatusOK {
 		t.Fatalf("successful status = %d, want %d: %s", success.Code, http.StatusOK, success.Body.String())
 	}
-	stored, err = model.GetUserByID(uint64(user.ID))
+	stored, err = model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading user after password change: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 	user := setupUserHandlerTestDB(t)
 	router := gin.New()
 	router.POST("/mfa/setup", func(c *gin.Context) {
-		current, err := model.GetUserByID(uint64(user.ID))
+		current, err := model.GetUserByID(context.Background(), uint64(user.ID))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			return
@@ -67,7 +68,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 		SetupCurrentUserMFA(c)
 	})
 	router.POST("/mfa/enable", func(c *gin.Context) {
-		current, err := model.GetUserByID(uint64(user.ID))
+		current, err := model.GetUserByID(context.Background(), uint64(user.ID))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			return
@@ -76,7 +77,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 		EnableCurrentUserMFA(c)
 	})
 	router.POST("/mfa/disable", func(c *gin.Context) {
-		current, err := model.GetUserByID(uint64(user.ID))
+		current, err := model.GetUserByID(context.Background(), uint64(user.ID))
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			return
@@ -100,7 +101,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 	if setupBody.Secret == "" || !strings.Contains(setupBody.OTPAuthURL, setupBody.Secret) || !strings.HasPrefix(setupBody.QRCode, "data:image/png;base64,") {
 		t.Fatalf("invalid MFA setup response: %#v", setupBody)
 	}
-	pending, err := model.GetUserByID(uint64(user.ID))
+	pending, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading pending MFA user: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 	if enable.Code != http.StatusOK {
 		t.Fatalf("enable status = %d, want %d: %s", enable.Code, http.StatusOK, enable.Body.String())
 	}
-	enabled, err := model.GetUserByID(uint64(user.ID))
+	enabled, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading enabled MFA user: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestCurrentUserMFALifecycle(t *testing.T) {
 	if disable.Code != http.StatusOK {
 		t.Fatalf("disable status = %d, want %d: %s", disable.Code, http.StatusOK, disable.Body.String())
 	}
-	disabled, err := model.GetUserByID(uint64(user.ID))
+	disabled, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading disabled MFA user: %v", err)
 	}
@@ -169,7 +170,7 @@ func TestUpdateSidebarPreferenceHonorsGlobalPolicy(t *testing.T) {
 	if blocked.Code != http.StatusForbidden {
 		t.Fatalf("non-admin status = %d, want %d", blocked.Code, http.StatusForbidden)
 	}
-	stored, err := model.GetUserByID(uint64(user.ID))
+	stored, err := model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading blocked user: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestUpdateSidebarPreferenceHonorsGlobalPolicy(t *testing.T) {
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("admin status = %d, want %d: %s", allowed.Code, http.StatusOK, allowed.Body.String())
 	}
-	stored, err = model.GetUserByID(uint64(user.ID))
+	stored, err = model.GetUserByID(context.Background(), uint64(user.ID))
 	if err != nil {
 		t.Fatalf("loading admin user: %v", err)
 	}
@@ -230,7 +231,7 @@ func setupUserHandlerTestDB(t *testing.T) *model.User {
 		t.Fatalf("creating general setting: %v", err)
 	}
 	user := &model.User{Username: "alice", Password: "old-secret", Provider: model.AuthProviderPassword, Enabled: true}
-	if err := model.AddUser(user); err != nil {
+	if err := model.AddUser(context.Background(), user); err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 	gin.SetMode(gin.TestMode)

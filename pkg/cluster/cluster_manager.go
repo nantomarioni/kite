@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -213,7 +214,7 @@ func (cm *ClusterManager) GetClientSet(clusterName string) (*ClientSet, error) {
 	return nil, fmt.Errorf("cluster not found: %s", clusterName)
 }
 
-func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bool) int64 {
+func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.Config, setDefault bool) int64 {
 	if len(kubeconfig.Contexts) == 0 {
 		return 0
 	}
@@ -240,10 +241,10 @@ func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bo
 			Config:    model.SecretString(configStr),
 			IsDefault: setDefault && contextName == kubeconfig.CurrentContext,
 		}
-		existingCluster, err := model.GetClusterByName(contextName)
+		existingCluster, err := model.GetClusterByName(ctx, contextName)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := model.AddCluster(&cluster); err != nil {
+				if err := model.AddCluster(ctx, &cluster); err != nil {
 					continue
 				}
 				importedCount++
@@ -254,7 +255,7 @@ func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bo
 		if existingCluster.ClusterAgent {
 			continue
 		}
-		if err := model.UpdateCluster(existingCluster, map[string]interface{}{
+		if err := model.UpdateCluster(ctx, existingCluster, map[string]interface{}{
 			"config": model.SecretString(configStr),
 		}); err != nil {
 			continue
@@ -286,7 +287,7 @@ func syncClusters(cm *ClusterManager, readyCh chan<- struct{}) error {
 		}()
 	}
 
-	clusters, err := model.ListClusters()
+	clusters, err := model.ListClusters(context.Background())
 	if err != nil {
 		klog.Warningf("list cluster err: %v", err)
 		time.Sleep(5 * time.Second)

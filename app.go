@@ -28,6 +28,9 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 	}
 
 	model.InitDB()
+	if err := tracing.InstrumentDB(model.DB); err != nil {
+		klog.Warningf("Failed to instrument database for tracing: %v", err)
+	}
 	if _, err := model.GetGeneralSetting(); err != nil {
 		klog.Warningf("Failed to load general setting: %v", err)
 	}
@@ -54,6 +57,9 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 
 func buildEngine(cm *cluster.ClusterManager) *gin.Engine {
 	r := gin.New()
+	// Let handlers pass c as a context.Context: it then carries the request's
+	// cancellation and (when tracing) its span.
+	r.ContextWithFallback = true
 	middleware.ConfigureRawPathRouting(r)
 	configureTrustedProxies(r)
 	if tracing.Enabled() {

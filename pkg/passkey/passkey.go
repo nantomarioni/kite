@@ -1,6 +1,7 @@
 package passkey
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -137,7 +138,7 @@ func FinishLogin(c *gin.Context) (*model.User, error) {
 	}
 	var credentialRecord *model.PasskeyCredential
 	user, credential, err := w.FinishPasskeyLogin(func(rawID, userHandle []byte) (webauthn.User, error) {
-		webUser, record, err := userForCredential(rawID, userHandle)
+		webUser, record, err := userForCredential(c.Request.Context(), rawID, userHandle)
 		if err != nil {
 			return nil, err
 		}
@@ -195,12 +196,12 @@ func updateCredential(record *model.PasskeyCredential, credential webauthn.Crede
 	return model.UpdatePasskeyCredential(record)
 }
 
-func userForCredential(rawID []byte, handle []byte) (webauthn.User, *model.PasskeyCredential, error) {
+func userForCredential(ctx context.Context, rawID []byte, handle []byte) (webauthn.User, *model.PasskeyCredential, error) {
 	record, err := model.GetPasskeyCredentialByCredentialID(credentialIDString(rawID))
 	if err != nil {
 		return nil, nil, err
 	}
-	user, err := model.GetUserByID(uint64(record.UserID))
+	user, err := model.GetUserByID(ctx, uint64(record.UserID))
 	if err != nil {
 		return nil, nil, err
 	}

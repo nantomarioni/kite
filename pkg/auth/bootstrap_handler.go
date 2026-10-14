@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -48,7 +49,7 @@ func (h *AuthHandler) Bootstrap(c *gin.Context) {
 		return
 	}
 
-	setup := currentBootstrapSetup()
+	setup := currentBootstrapSetup(c.Request.Context())
 	var user *model.User
 	if setup.Step == 0 && !setup.Initialized {
 		c.SetCookie("auth_token", "", -1, "/", "", false, true)
@@ -64,7 +65,7 @@ func (h *AuthHandler) Bootstrap(c *gin.Context) {
 	c.JSON(http.StatusOK, bootstrapResponse{
 		KiteVersion: version.Version,
 		Setup:       setup,
-		Auth:        h.bootstrapAuth(setting),
+		Auth:        h.bootstrapAuth(c.Request.Context(), setting),
 		Capabilities: bootstrapCapabilities{
 			AIEnabled:      setting.AIAgentEnabled && strings.TrimSpace(string(setting.AIAPIKey)) != "",
 			KubectlEnabled: setting.KubectlEnabled,
@@ -75,9 +76,9 @@ func (h *AuthHandler) Bootstrap(c *gin.Context) {
 	})
 }
 
-func currentBootstrapSetup() bootstrapSetupState {
+func currentBootstrapSetup(ctx context.Context) bootstrapSetupState {
 	step := 0
-	uc, _ := model.CountUsers()
+	uc, _ := model.CountUsers(ctx)
 	if uc == 0 && !common.AnonymousUserEnabled {
 		return bootstrapSetupState{Initialized: false, Step: step}
 	}
@@ -88,7 +89,7 @@ func currentBootstrapSetup() bootstrapSetupState {
 	if common.IsSectionManaged("clusters") {
 		step++
 	} else {
-		cc, _ := model.CountClusters()
+		cc, _ := model.CountClusters(ctx)
 		if cc > 0 {
 			step++
 		}
@@ -97,7 +98,7 @@ func currentBootstrapSetup() bootstrapSetupState {
 	return bootstrapSetupState{Initialized: step == 2, Step: step}
 }
 
-func (h *AuthHandler) bootstrapAuth(setting *model.GeneralSetting) bootstrapAuthOptions {
+func (h *AuthHandler) bootstrapAuth(ctx context.Context, setting *model.GeneralSetting) bootstrapAuthOptions {
 	var credentialProviders []string
 	loginPrompt := ""
 
@@ -108,7 +109,7 @@ func (h *AuthHandler) bootstrapAuth(setting *model.GeneralSetting) bootstrapAuth
 		loginPrompt = setting.LoginPrompt
 	}
 
-	oauthProviders := uniqueStrings(h.manager.GetAvailableProviders())
+	oauthProviders := uniqueStrings(h.manager.GetAvailableProviders(ctx))
 
 	ldapSetting, err := model.GetLDAPSetting()
 	if err != nil {
@@ -132,7 +133,7 @@ func (h *AuthHandler) bootstrapAuth(setting *model.GeneralSetting) bootstrapAuth
 
 func (h *AuthHandler) bootstrapUser(c *gin.Context, setting *model.GeneralSetting) *model.User {
 	if common.AnonymousUserEnabled {
-		u := model.GetAnonymousUser()
+		u := model.GetAnonymousUser(c.Request.Context())
 		if u == nil {
 			anonymousUser := model.AnonymousUser
 			applyBootstrapSidebarPreference(&anonymousUser, setting)
@@ -162,7 +163,7 @@ func (h *AuthHandler) bootstrapUser(c *gin.Context, setting *model.GeneralSettin
 		}
 	}
 
-	user, err := model.GetUserByIDCached(uint64(claims.UserID))
+	user, err := model.GetUserByIDCached(c.Request.Context(), uint64(claims.UserID))
 	if err != nil || !user.Enabled {
 		return nil
 	}

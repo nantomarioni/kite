@@ -16,6 +16,7 @@ import (
 	"github.com/zxh326/kite/pkg/kube"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
+	"github.com/zxh326/kite/pkg/tracing"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -569,16 +570,19 @@ func (h *GenericResourceHandler[T, V]) ListHistory(c *gin.Context) {
 func (h *GenericResourceHandler[T, V]) Describe(c *gin.Context) {
 	cs := c.MustGet("cluster").(*cluster.ClientSet)
 	gk := h.getGroupKind()
-	describer, ok := describe.DescriberFor(gk, cs.K8sClient.Configuration)
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	ctx, endSpan := tracing.StartDescribe(c.Request.Context(), gk.Kind, namespace, name)
+	describer, ok := describe.DescriberFor(gk, tracing.ConfigWithParent(ctx, cs.K8sClient.Configuration))
 	if !ok {
+		endSpan(nil)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "no describer found for this resource"})
 		return
 	}
-	namespace := c.Param("namespace")
-	name := c.Param("name")
 	out, err := describer.Describe(namespace, name, describe.DescriberSettings{
 		ShowEvents: true,
 	})
+	endSpan(err)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -9,6 +9,7 @@ import (
 	"github.com/zxh326/kite/pkg/cluster"
 	"github.com/zxh326/kite/pkg/common"
 	"github.com/zxh326/kite/pkg/kube"
+	"github.com/zxh326/kite/pkg/tracing"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -449,15 +450,18 @@ func (h *CRHandler) Describe(c *gin.Context) {
 	if crd.Spec.Scope == apiextensionsv1.ClusterScoped {
 		mapping.Scope = meta.RESTScopeRoot
 	}
-	describer, ok := describe.GenericDescriberFor(mapping, cs.K8sClient.Configuration)
+	namespace := c.Param("namespace")
+	spanCtx, endSpan := tracing.StartDescribe(ctx, gvk.Kind, namespace, name)
+	describer, ok := describe.GenericDescriberFor(mapping, tracing.ConfigWithParent(spanCtx, cs.K8sClient.Configuration))
 	if !ok {
+		endSpan(nil)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create describer"})
 		return
 	}
-	namespace := c.Param("namespace")
 	out, err := describer.Describe(namespace, name, describe.DescriberSettings{
 		ShowEvents: true,
 	})
+	endSpan(err)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

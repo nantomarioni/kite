@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/zxh326/kite/pkg/tracing"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -70,6 +71,7 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 			cancel()
 			return nil, fmt.Errorf("failed to create client: %w", err)
 		}
+		c = tracing.WrapClient(c, false)
 	} else {
 		mgr, err := manager.New(config, manager.Options{
 			Scheme:         runtimeScheme,
@@ -107,7 +109,7 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 			cancel()
 			return nil, fmt.Errorf("failed to wait for cache sync")
 		}
-		c = mgr.GetClient()
+		c = tracing.WrapClient(mgr.GetClient(), true)
 	}
 
 	return &K8sClient{

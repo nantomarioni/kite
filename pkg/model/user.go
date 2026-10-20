@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -401,6 +402,10 @@ func ListAPIKeyUsers(ctx context.Context) (users []User, err error) {
 
 // FindOrCreateAuthProxyUser finds or creates a user from auth proxy headers.
 // Uses uid (stored in Sub field) as the unique identifier.
+// authProxyLoginRefresh is how often an unchanged auth proxy user's
+// LastLoginAt is persisted.
+const authProxyLoginRefresh = 5 * time.Minute
+
 func FindOrCreateAuthProxyUser(ctx context.Context, uid, username, name, email string, groups []string) (*User, error) {
 	if uid == "" {
 		return nil, errors.New("auth proxy uid is empty")
@@ -427,6 +432,14 @@ func FindOrCreateAuthProxyUser(ctx context.Context, uid, username, name, email s
 			return newUser, nil
 		}
 		return nil, err
+	}
+
+	// Skip the write when nothing changed and the login is recent: this runs
+	// on every proxied request, and each write is slow on SQLite over NFS.
+	if existingUser.Username == username && existingUser.Name == name &&
+		slices.Equal(existingUser.OIDCGroups, groups) &&
+		existingUser.LastLoginAt != nil && now.Sub(*existingUser.LastLoginAt) < authProxyLoginRefresh {
+		return &existingUser, nil
 	}
 
 	// Update existing user with latest info

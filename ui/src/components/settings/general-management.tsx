@@ -32,7 +32,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
 const DEFAULT_MODEL = 'gpt-4o-mini'
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5'
+const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5'
 const DEFAULT_KUBECTL_IMAGE = 'zzde/kubectl:latest'
 const DEFAULT_NODE_TERMINAL_IMAGE = 'busybox:latest'
 const DEFAULT_CLUSTER_AGENT_IMAGE = 'ghcr.io/kite-org/kite:latest'
@@ -59,6 +59,7 @@ export function GeneralManagement() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { data, isLoading } = useGeneralSetting()
+  const isAIManaged = data?.aiManaged ?? false
   const [formData, setFormData] = useState<GeneralSettingsFormData>({
     aiAgentEnabled: false,
     aiProvider: 'openai',
@@ -127,13 +128,14 @@ export function GeneralManagement() {
         ? DEFAULT_ANTHROPIC_MODEL
         : DEFAULT_MODEL
 
-    if (formData.aiAgentEnabled && !formData.aiModel.trim()) {
+    if (!isAIManaged && formData.aiAgentEnabled && !formData.aiModel.trim()) {
       toast.error(
         t('generalManagement.errors.modelRequired', 'Model is required')
       )
       return
     }
     if (
+      !isAIManaged &&
       formData.aiAgentEnabled &&
       !formData.aiApiKey.trim() &&
       !formData.aiApiKeyConfigured
@@ -166,11 +168,6 @@ export function GeneralManagement() {
     }
 
     const payload: GeneralSettingUpdateRequest = {
-      aiAgentEnabled: formData.aiAgentEnabled,
-      aiProvider: formData.aiProvider,
-      aiModel: formData.aiModel.trim() || defaultModel,
-      aiBaseUrl: formData.aiBaseUrl.trim(),
-      aiMaxTokens: formData.aiMaxTokens || 16384,
       kubectlEnabled: formData.kubectlEnabled,
       kubectlImage: formData.kubectlImage.trim() || DEFAULT_KUBECTL_IMAGE,
       nodeTerminalImage:
@@ -182,8 +179,15 @@ export function GeneralManagement() {
       enableVersionCheck: formData.enableVersionCheck,
       loginPrompt: formData.loginPrompt.trim(),
     }
-    if (formData.aiApiKey.trim()) {
-      payload.aiApiKey = formData.aiApiKey.trim()
+    if (!isAIManaged) {
+      payload.aiAgentEnabled = formData.aiAgentEnabled
+      payload.aiProvider = formData.aiProvider
+      payload.aiModel = formData.aiModel.trim() || defaultModel
+      payload.aiBaseUrl = formData.aiBaseUrl.trim()
+      payload.aiMaxTokens = formData.aiMaxTokens || 16384
+      if (formData.aiApiKey.trim()) {
+        payload.aiApiKey = formData.aiApiKey.trim()
+      }
     }
 
     mutation.mutate(payload)
@@ -222,8 +226,14 @@ export function GeneralManagement() {
                   'Enable AI assistant and configure model endpoint.'
                 )}
               </p>
+              {isAIManaged && (
+                <p className="text-xs text-muted-foreground">
+                  {t('generalManagement.aiAgent.managedByConfig')}
+                </p>
+              )}
             </div>
             <Switch
+              disabled={isAIManaged}
               checked={formData.aiAgentEnabled}
               onCheckedChange={(checked) =>
                 setFormData((prev) => ({ ...prev, aiAgentEnabled: checked }))
@@ -238,6 +248,7 @@ export function GeneralManagement() {
                   {t('common.fields.provider', 'Provider')}
                 </Label>
                 <Select
+                  disabled={isAIManaged}
                   value={formData.aiProvider}
                   onValueChange={(value: 'openai' | 'anthropic') =>
                     setFormData((prev) => ({
@@ -268,6 +279,7 @@ export function GeneralManagement() {
                 </Label>
                 <Input
                   id="general-ai-model"
+                  disabled={isAIManaged}
                   value={formData.aiModel}
                   onChange={(e) =>
                     setFormData((prev) => ({
@@ -289,6 +301,7 @@ export function GeneralManagement() {
                 </Label>
                 <Input
                   id="general-ai-api-key"
+                  disabled={isAIManaged}
                   type="password"
                   value={formData.aiApiKey}
                   onChange={(e) =>
@@ -314,6 +327,7 @@ export function GeneralManagement() {
                 </Label>
                 <Input
                   id="general-ai-base-url"
+                  disabled={isAIManaged}
                   value={formData.aiBaseUrl}
                   onChange={(e) =>
                     setFormData((prev) => ({
@@ -335,6 +349,7 @@ export function GeneralManagement() {
                 </Label>
                 <Input
                   id="general-ai-max-tokens"
+                  disabled={isAIManaged}
                   type="number"
                   min="1"
                   max="128000"

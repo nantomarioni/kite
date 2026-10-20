@@ -22,6 +22,7 @@ type KiteConfig struct {
 	Clusters  []ClusterConfig  `yaml:"clusters"`
 	OAuth     []OAuthConfig    `yaml:"oauth"`
 	LDAP      *LDAPConfig      `yaml:"ldap"`
+	AI        *AIConfig        `yaml:"ai"`
 	RBAC      *RBACConfig      `yaml:"rbac"`
 }
 
@@ -69,6 +70,15 @@ type LDAPConfig struct {
 	GroupBaseDN          string `yaml:"groupBaseDn"`
 	GroupFilter          string `yaml:"groupFilter"`
 	GroupNameAttribute   string `yaml:"groupNameAttribute"`
+}
+
+type AIConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	Provider  string `yaml:"provider"`
+	Model     string `yaml:"model"`
+	APIKey    string `yaml:"apiKey"`
+	BaseURL   string `yaml:"baseUrl"`
+	MaxTokens int    `yaml:"maxTokens"`
 }
 
 type RBACConfig struct {
@@ -154,6 +164,15 @@ func applyConfig(path string, cfg *KiteConfig) AppliedSections {
 		} else {
 			sections["ldap"] = true
 			klog.Info("Applied LDAP settings from config file")
+		}
+	}
+
+	if cfg.AI != nil {
+		if err := applyAI(cfg.AI); err != nil {
+			klog.Errorf("Failed to apply AI config: %v", err)
+		} else {
+			sections["ai"] = true
+			klog.Info("Applied AI settings from config file")
 		}
 	}
 
@@ -310,6 +329,38 @@ func applyLDAP(cfg *LDAPConfig) error {
 	}
 
 	_, err := model.UpdateLDAPSetting(setting)
+	return err
+}
+
+func applyAI(cfg *AIConfig) error {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "" {
+		provider = model.DefaultGeneralAIProvider
+	}
+	if !model.IsGeneralAIProviderSupported(provider) {
+		return fmt.Errorf("unsupported AI provider")
+	}
+	aiModel := strings.TrimSpace(cfg.Model)
+	if aiModel == "" {
+		aiModel = model.DefaultGeneralAIModelByProvider(provider)
+	}
+	apiKey := strings.TrimSpace(cfg.APIKey)
+	if cfg.Enabled && apiKey == "" {
+		return fmt.Errorf("AI apiKey is required when enabled is true")
+	}
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16384
+	}
+
+	_, err := model.UpdateGeneralSetting(map[string]interface{}{
+		"ai_agent_enabled": cfg.Enabled,
+		"ai_provider":      provider,
+		"ai_model":         aiModel,
+		"ai_api_key":       model.SecretString(apiKey),
+		"ai_base_url":      strings.TrimSpace(cfg.BaseURL),
+		"ai_max_tokens":    maxTokens,
+	})
 	return err
 }
 

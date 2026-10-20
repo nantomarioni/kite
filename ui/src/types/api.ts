@@ -66,6 +66,8 @@ import { StorageClass, StorageClassList } from 'kubernetes-types/storage/v1'
 
 import type { ResourceType } from '@/lib/resource-metadata'
 
+import type { VerticalPodAutoscaler, VerticalPodAutoscalerList } from './vpa'
+
 export type { ResourceType } from '@/lib/resource-metadata'
 
 export interface CustomResource {
@@ -411,6 +413,7 @@ export interface ResourcesTypeMap {
   ipaddresses: KubernetesResourceList
   servicecidrs: KubernetesResourceList
   horizontalpodautoscalers: HorizontalPodAutoscalerList
+  verticalpodautoscalers: VerticalPodAutoscalerList
   helmrelease: HelmReleaseList
 }
 
@@ -522,6 +525,7 @@ export interface ResourceTypeMap {
   ipaddresses: KubernetesResource
   servicecidrs: KubernetesResource
   horizontalpodautoscalers: HorizontalPodAutoscaler
+  verticalpodautoscalers: VerticalPodAutoscaler
   helmrelease: HelmRelease
 }
 

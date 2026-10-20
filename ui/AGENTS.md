@@ -2,7 +2,7 @@
 
 The React SPA, built by Vite to `../static/` and **embedded in the Go binary**
 (not deployed separately). Root `AGENTS.md` has the big picture + fork status.
-Stack: React 19 + TS 5, Vite 7, pnpm, TanStack Query/Table, Tailwind v4 + Radix
+Stack: React 19 + TS 6, Vite 8, pnpm, TanStack Query/Table, Tailwind v4 + Radix
 + shadcn (`components.json`, "new-york"), Monaco, xterm.js, recharts,
 react-router-dom v7, i18next (en/zh).
 
@@ -12,11 +12,12 @@ react-router-dom v7, i18next (en/zh).
 pnpm install
 pnpm run dev          # Vite dev server (proxies /api → :8080)
 pnpm run build        # tsc -b && vite build → ../static
-pnpm run lint | type-check | format   # eslint . | tsc --noEmit | prettier --write .
+pnpm run lint | test | format   # eslint . | vitest run | prettier --write .
+pnpm exec tsc --noEmit -p tsconfig.app.json   # typecheck (the root `type-check` config has no sources)
 ```
 
-Gate (no unit test runner): **`type-check` + `lint` clean** and `vite build`
-succeeds (root `make build`).
+Gate: **typecheck + `lint` + `test` clean** and `vite build` succeeds (root
+`make build`).
 
 ## Layout
 
@@ -26,7 +27,8 @@ ui/src/
 ├── pages/                          # one file per route (overview, resource-list, resource-detail, settings, vpa-*, …)
 ├── components/                     # feature components + components/ui/ (shadcn primitives), chart/, editors/, AppView/
 ├── lib/
-│   ├── api.ts                      # ALL data hooks/fns (useResources, useResource, mutations, SSE/WS streams)
+│   ├── api.ts + api/*.ts           # ALL data hooks/fns (useResources, useResource, mutations, SSE/WS streams)
+│   ├── resource-catalog.ts         # every resource type: labels, icon, sidebar group → sidebar/routes/search
 │   ├── api-client.ts               # fetch wrapper w/ auth refresh + cluster header (apiClient)
 │   ├── subpath.ts                  # KITE_BASE / dynamic-base handling (withSubPath, getWebSocketUrl)
 │   ├── appview-api.ts useWebSocket.ts k8s.ts utils.ts favorites.ts query-provider.tsx
@@ -64,16 +66,18 @@ auth cookie, 401 refresh, `x-cluster-name`) as TanStack Query hooks. Never
    for a CRD).
 2. **Data** — reuse the generic hooks in `api.ts`. Only add a bespoke `api.ts`
    function for a non-CRUD endpoint (mirror `scaleDeployment`, `drainNode`).
-3. **Page + route** — new `pages/<name>.tsx`, register in `routes.tsx` (lazy-load
-   heavy pages, see `AppView`), and add it to the sidebar config
-   (`contexts/sidebar-config-context.tsx` / `types/sidebar.ts`).
+3. **Page + route** — a resource type is one entry in `lib/resource-catalog.ts`
+   (sidebar + `/:resource` routing) and, for custom pages, a case in
+   `pages/resource-definitions.tsx`; detail pages use `ResourceDetailShell` +
+   `ResourceOverview`. Non-resource pages go in `routes.tsx` (lazy-load heavy
+   ones, see `AppView`) and `contexts/sidebar-config-defaults.ts`.
 4. **i18n** — add keys to **both** `i18n/locales/en.json` and `zh.json` (keep the
    trees parallel).
 
 **CRD views need no backend change** (generic CRD API). Fork examples: VPA
 (`types/vpa.ts`, `pages/vpa-list-page.tsx` + `vpa-detail.tsx`,
-`components/vpa-*.tsx`); per-container usage (`components/container-table.tsx`,
-`pod-resource-usage.tsx`) on `pages/pod-detail.tsx`.
+`components/vpa-*.tsx`); per-container usage + last restart reason (`components/container-resource-usage.tsx`,
+a child of upstream's `ContainerInfoCard`) on the pod and workload detail pages.
 
 ## Conventions
 

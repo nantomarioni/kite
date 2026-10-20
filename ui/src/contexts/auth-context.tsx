@@ -2,37 +2,59 @@
 import {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useEffect,
-  useState,
+  useMemo,
 } from 'react'
 
+import type { BootstrapCapabilities, CredentialProvider } from '@/lib/api'
+import {
+  loginWithCredentials as authenticateWithCredentials,
+  initiateOAuthLogin,
+  logout as logoutUser,
+  refreshAuthToken,
+  useBootstrap,
+  type AuthUser,
+} from '@/lib/api'
 import { withSubPath } from '@/lib/subpath'
 
-interface User {
-  id: string
-  username: string
-  name: string
-  avatar_url: string
-  provider: string
-  roles?: { name: string }[]
-  sidebar_preference?: string
-
+interface User extends AuthUser {
   isAdmin(): boolean
+
+  Key(): string
 }
 
 interface AuthContextType {
+  kiteVersion: string | undefined
   user: User | null
   isLoading: boolean
-  providers: string[]
+  hasGlobalSidebarPreference: boolean
+  globalSidebarPreference: string
+  credentialProviders: CredentialProvider[]
+  oauthProviders: string[]
+  loginPrompt: string
+  mfaEnabled: boolean
+  passkeyLoginEnabled: boolean
+  capabilities: BootstrapCapabilities
   login: (provider?: string) => Promise<void>
-  loginWithPassword: (username: string, password: string) => Promise<void>
+  loginWithCredentials: (
+    provider: CredentialProvider,
+    username: string,
+    password: string,
+    mfaCode?: string
+  ) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
   refreshToken: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const defaultCapabilities: BootstrapCapabilities = {
+  aiEnabled: false,
+  kubectlEnabled: true,
+}
 
 export function useAuth() {
   const context = useContext(AuthContext)
@@ -46,147 +68,77 @@ interface AuthProviderProps {
   children: ReactNode
 }
 
-export function AuthProvider({ children }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [providers, setProviders] = useState<string[]>([])
-
-  const loadProviders = async () => {
-    try {
-      const response = await fetch(withSubPath('/api/auth/providers'))
-      if (response.ok) {
-        const data = await response.json()
-        setProviders(data.providers || [])
-      }
-    } catch (error) {
-      console.error('Failed to load OAuth providers:', error)
-    }
-  }
-
-  const checkAuth = async () => {
-    try {
-      const response = await fetch(withSubPath('/api/auth/user'), {
-        credentials: 'include',
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        const user = data.user as User
-        user.isAdmin = function () {
-          return (
-            this.roles?.some(
-              (role: { name: string }) => role.name === 'admin'
-            ) || false
-          )
-        }
-        setUser(user)
-      } else {
-        setUser(null)
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error)
-      setUser(null)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const login = async (provider: string = 'github') => {
-    try {
-      const response = await fetch(
-        withSubPath(`/api/auth/login?provider=${provider}`),
-        {
-          credentials: 'include',
-        }
+function normalizeUser(user: AuthUser): User {
+  return {
+    ...user,
+    isAdmin() {
+      return (
+        this.roles?.some((role: { name: string }) => role.name === 'admin') ||
+        false
       )
-
-      if (response.ok) {
-        const data = await response.json()
-        window.location.href = data.auth_url
-      } else {
-        throw new Error('Failed to initiate login')
-      }
-    } catch (error) {
-      console.error('Login failed:', error)
-      throw error
-    }
+    },
+    Key() {
+      return this.username || this.id
+    },
   }
+}
 
-  const loginWithPassword = async (username: string, password: string) => {
-    try {
-      const response = await fetch(withSubPath('/api/auth/login/password'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username, password }),
-        credentials: 'include',
-      })
+export function AuthProvider({ children }: AuthProviderProps) {
+  const {
+    data: bootstrap,
+    isLoading,
+    refetch: refetchBootstrap,
+  } = useBootstrap()
 
-      if (response.ok) {
-        await checkAuth()
-      } else {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Password login failed')
-      }
-    } catch (error) {
-      console.error('Password login failed:', error)
-      throw error
-    }
-  }
+  const checkAuth = useCallback(async () => {
+    await refetchBootstrap()
+  }, [refetchBootstrap])
 
-  const refreshToken = async () => {
-    try {
-      const response = await fetch(withSubPath('/api/auth/refresh'), {
-        method: 'POST',
-        credentials: 'include',
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to refresh token')
-      }
-    } catch (error) {
-      console.error('Token refresh failed:', error)
-      setUser(null)
-      window.location.href = withSubPath('/login')
-    }
-  }
-
-  const logout = async () => {
-    try {
-      const response = await fetch(withSubPath('/api/auth/logout'), {
-        method: 'POST',
-        credentials: 'include',
-      })
-
-      if (response.ok) {
-        setUser(null)
-        window.location.href = withSubPath('/login')
-      } else {
-        throw new Error('Failed to logout')
-      }
-    } catch (error) {
-      console.error('Logout failed:', error)
-      throw error
-    }
-  }
-
-  useEffect(() => {
-    const initAuth = async () => {
-      await loadProviders()
-      await checkAuth()
-    }
-    initAuth()
+  const login = useCallback(async (provider: string = 'github') => {
+    const { auth_url } = await initiateOAuthLogin(provider)
+    window.location.href = auth_url
   }, [])
 
-  // Set up automatic token refresh
+  const loginWithCredentials = useCallback(
+    async (
+      provider: CredentialProvider,
+      username: string,
+      password: string,
+      mfaCode?: string
+    ) => {
+      await authenticateWithCredentials(provider, username, password, mfaCode)
+      await checkAuth()
+    },
+    [checkAuth]
+  )
+
+  const logout = useCallback(async () => {
+    await logoutUser()
+    await refetchBootstrap()
+    window.location.href = withSubPath('/login')
+  }, [refetchBootstrap])
+
+  const refreshToken = useCallback(async () => {
+    try {
+      await refreshAuthToken()
+    } catch (error) {
+      console.error('Token refresh failed:', error)
+      await refetchBootstrap()
+      window.location.href = withSubPath('/login')
+    }
+  }, [refetchBootstrap])
+
+  const user = useMemo(
+    () => (bootstrap?.user ? normalizeUser(bootstrap.user) : null),
+    [bootstrap?.user]
+  )
+
   useEffect(() => {
     if (!user) return
     const refreshKey = 'lastRefreshTokenAt'
     const lastRefreshAt = localStorage.getItem(refreshKey)
     const now = Date.now()
 
-    // If the last refresh was more than 30 minutes ago, refresh immediately
     if (!lastRefreshAt || now - Number(lastRefreshAt) > 30 * 60 * 1000) {
       refreshToken()
       localStorage.setItem(refreshKey, String(now))
@@ -198,21 +150,62 @@ export function AuthProvider({ children }: AuthProviderProps) {
         localStorage.setItem(refreshKey, String(Date.now()))
       },
       30 * 60 * 1000
-    ) // Refresh every 30 minutes
+    )
 
     return () => clearInterval(refreshInterval)
-  }, [user])
+  }, [user, refreshToken])
 
-  const value = {
+  const globalSidebarPreference = String(
+    bootstrap?.globalSidebarPreference || ''
+  )
+  const hasGlobalSidebarPreference =
+    bootstrap?.hasGlobalSidebarPreference ??
+    globalSidebarPreference.trim() !== ''
+  const loginPrompt = bootstrap?.auth.loginPrompt || ''
+  const mfaEnabled = bootstrap?.auth.mfaEnabled ?? true
+  const passkeyLoginEnabled = bootstrap?.auth.passkeyLoginEnabled ?? false
+  const capabilities = bootstrap?.capabilities ?? defaultCapabilities
+
+  const value = useMemo(() => {
+    const credentialProviders = bootstrap?.auth.credentialProviders ?? []
+    const oauthProviders = bootstrap?.auth.oauthProviders ?? []
+
+    return {
+      kiteVersion: bootstrap?.kiteVersion,
+      user,
+      isLoading,
+      hasGlobalSidebarPreference,
+      globalSidebarPreference,
+      credentialProviders,
+      oauthProviders,
+      loginPrompt,
+      mfaEnabled,
+      passkeyLoginEnabled,
+      capabilities,
+      login,
+      loginWithCredentials,
+      logout,
+      checkAuth,
+      refreshToken,
+    }
+  }, [
+    bootstrap?.kiteVersion,
     user,
     isLoading,
-    providers,
+    hasGlobalSidebarPreference,
+    globalSidebarPreference,
+    bootstrap?.auth.credentialProviders,
+    bootstrap?.auth.oauthProviders,
+    loginPrompt,
+    mfaEnabled,
+    passkeyLoginEnabled,
+    capabilities,
     login,
-    loginWithPassword,
+    loginWithCredentials,
     logout,
     checkAuth,
     refreshToken,
-  }
+  ])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -14,246 +12,50 @@ import (
 
 	_ "net/http/pprof"
 
-	"github.com/gin-contrib/gzip"
-	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/zxh326/kite/internal"
-	"github.com/zxh326/kite/pkg/appview"
-	"github.com/zxh326/kite/pkg/auth"
-	"github.com/zxh326/kite/pkg/cluster"
+	"github.com/zxh326/kite/pkg/clusteragent"
 	"github.com/zxh326/kite/pkg/common"
-	"github.com/zxh326/kite/pkg/handlers"
-	"github.com/zxh326/kite/pkg/handlers/resources"
-	"github.com/zxh326/kite/pkg/middleware"
-	"github.com/zxh326/kite/pkg/model"
-	"github.com/zxh326/kite/pkg/rbac"
 	"github.com/zxh326/kite/pkg/tracing"
-	"github.com/zxh326/kite/pkg/utils"
 	"github.com/zxh326/kite/pkg/version"
 	"k8s.io/klog/v2"
-	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
-
-//go:embed static
-var static embed.FS
-
-func setupStatic(r *gin.Engine) {
-	base := common.Base
-	if base != "" && base != "/" {
-		r.GET("/", func(c *gin.Context) {
-			c.Redirect(http.StatusFound, base+"/")
-		})
-	}
-	assertsFS, err := fs.Sub(static, "static/assets")
-	if err != nil {
-		panic(err)
-	}
-	r.StaticFS(base+"/assets", http.FS(assertsFS))
-	r.NoRoute(func(c *gin.Context) {
-		path := c.Request.URL.Path
-		if len(path) >= len(base)+5 && path[len(base):len(base)+5] == "/api/" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "API endpoint not found"})
-			return
-		}
-
-		content, err := static.ReadFile("static/index.html")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read index.html"})
-			return
-		}
-
-		htmlContent := string(content)
-		htmlContent = utils.InjectKiteBase(htmlContent, base)
-		if common.EnableAnalytics {
-			htmlContent = utils.InjectAnalytics(htmlContent)
-		}
-
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, htmlContent)
-	})
-}
-
-func setupAPIRouter(r *gin.RouterGroup, cm *cluster.ClusterManager) {
-	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(prometheus.Gatherers{
-		prometheus.DefaultGatherer,
-		ctrlmetrics.Registry,
-	}, promhttp.HandlerOpts{})))
-	r.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-		})
-	})
-	r.GET("/api/v1/init_check", handlers.InitCheck)
-	r.GET("/api/v1/version", version.GetVersion)
-	// Auth routes (no auth required)
-	authHandler := auth.NewAuthHandler()
-	authGroup := r.Group("/api/auth")
-	{
-		authGroup.GET("/providers", authHandler.GetProviders)
-		authGroup.POST("/login/password", authHandler.PasswordLogin)
-		authGroup.GET("/login", authHandler.Login)
-		authGroup.GET("/callback", authHandler.Callback)
-		authGroup.POST("/logout", authHandler.Logout)
-		authGroup.POST("/refresh", authHandler.RefreshToken)
-		authGroup.GET("/user", authHandler.RequireAuth(), authHandler.GetUser)
-	}
-
-	userGroup := r.Group("/api/users")
-	{
-		userGroup.POST("/sidebar_preference", authHandler.RequireAuth(), handlers.UpdateSidebarPreference)
-	}
-
-	// admin apis
-	adminAPI := r.Group("/api/v1/admin")
-	// Initialize the setup API without authentication.
-	// Once users are configured, this API cannot be used.
-	adminAPI.POST("/users/create_super_user", handlers.CreateSuperUser)
-	adminAPI.POST("/clusters/import", cm.ImportClustersFromKubeconfig)
-	adminAPI.Use(authHandler.RequireAuth(), authHandler.RequireAdmin())
-	{
-		oauthProviderAPI := adminAPI.Group("/oauth-providers")
-		{
-			oauthProviderAPI.GET("/", authHandler.ListOAuthProviders)
-			oauthProviderAPI.POST("/", authHandler.CreateOAuthProvider)
-			oauthProviderAPI.GET("/:id", authHandler.GetOAuthProvider)
-			oauthProviderAPI.PUT("/:id", authHandler.UpdateOAuthProvider)
-			oauthProviderAPI.DELETE("/:id", authHandler.DeleteOAuthProvider)
-		}
-
-		clusterAPI := adminAPI.Group("/clusters")
-		{
-			clusterAPI.GET("/", cm.GetClusterList)
-			clusterAPI.POST("/", cm.CreateCluster)
-			clusterAPI.PUT("/:id", cm.UpdateCluster)
-			clusterAPI.DELETE("/:id", cm.DeleteCluster)
-		}
-
-		rbacAPI := adminAPI.Group("/roles")
-		{
-			rbacAPI.GET("/", rbac.ListRoles)
-			rbacAPI.POST("/", rbac.CreateRole)
-			rbacAPI.GET("/:id", rbac.GetRole)
-			rbacAPI.PUT("/:id", rbac.UpdateRole)
-			rbacAPI.DELETE("/:id", rbac.DeleteRole)
-
-			rbacAPI.POST("/:id/assign", rbac.AssignRole)
-			rbacAPI.DELETE("/:id/assign", rbac.UnassignRole)
-		}
-
-		userAPI := adminAPI.Group("/users")
-		{
-			userAPI.GET("/", handlers.ListUsers)
-			userAPI.POST("/", handlers.CreatePasswordUser)
-			userAPI.PUT(":id", handlers.UpdateUser)
-			userAPI.DELETE(":id", handlers.DeleteUser)
-			userAPI.POST(":id/reset_password", handlers.ResetPassword)
-			userAPI.POST(":id/enable", handlers.SetUserEnabled)
-		}
-
-		apiKeyAPI := adminAPI.Group("/apikeys")
-		{
-			apiKeyAPI.GET("/", handlers.ListAPIKeys)
-			apiKeyAPI.POST("/", handlers.CreateAPIKey)
-			apiKeyAPI.DELETE("/:id", handlers.DeleteAPIKey)
-		}
-
-		templateAPI := adminAPI.Group("/templates")
-		{
-			templateAPI.POST("/", handlers.CreateTemplate)
-			templateAPI.PUT("/:id", handlers.UpdateTemplate)
-			templateAPI.DELETE("/:id", handlers.DeleteTemplate)
-		}
-	}
-
-	// API routes group (protected)
-	api := r.Group("/api/v1")
-	api.GET("/clusters", authHandler.RequireAuth(), cm.GetClusters)
-	api.Use(authHandler.RequireAuth(), middleware.ClusterMiddleware(cm))
-	{
-		api.GET("/overview", handlers.GetOverview)
-
-		promHandler := handlers.NewPromHandler()
-		api.GET("/prometheus/resource-usage-history", promHandler.GetResourceUsageHistory)
-		api.GET("/prometheus/pods/:namespace/:podName/metrics", promHandler.GetPodMetrics)
-
-		logsHandler := handlers.NewLogsHandler()
-		api.GET("/logs/:namespace/:podName/ws", logsHandler.HandleLogsWebSocket)
-
-		terminalHandler := handlers.NewTerminalHandler()
-		api.GET("/terminal/:namespace/:podName/ws", terminalHandler.HandleTerminalWebSocket)
-
-		nodeTerminalHandler := handlers.NewNodeTerminalHandler()
-		api.GET("/node-terminal/:nodeName/ws", nodeTerminalHandler.HandleNodeTerminalWebSocket)
-
-		searchHandler := handlers.NewSearchHandler()
-		api.GET("/search", searchHandler.GlobalSearch)
-
-		resourceApplyHandler := handlers.NewResourceApplyHandler()
-		api.POST("/resources/apply", resourceApplyHandler.ApplyResource)
-
-		api.GET("/image/tags", handlers.GetImageTags)
-		api.GET("/templates", handlers.ListTemplates)
-
-		proxyHandler := handlers.NewProxyHandler()
-		proxyHandler.RegisterRoutes(api)
-
-		api.Use(middleware.RBACMiddleware())
-		resources.RegisterRoutes(api)
-		appview.RegisterHandlers(api.Group("/app-view"))
-	}
-}
 
 func main() {
 	klog.InitFlags(nil)
+	if len(os.Args) > 1 && os.Args[1] == "cluster-agent" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		err := clusteragent.Run(ctx, os.Args[2:])
+		stop()
+		if err != nil {
+			log.Fatalf("Failed to run cluster agent: %v", err)
+		}
+		return
+	}
 	flag.Parse()
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
-	common.LoadEnvs()
+
 	// Tracing reads the standard OTEL_* env itself; off unless an endpoint is set.
 	// Must run before cluster.NewClusterManager() so k8s transports get wrapped.
 	shutdownTracing, err := tracing.Init(context.Background())
 	if err != nil {
 		klog.Warningf("Failed to initialize tracing, continuing without it: %v", err)
 	}
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	// Let handlers pass c as a context.Context: it then carries the request's
-	// cancellation and (when tracing) its span.
-	r.ContextWithFallback = true
-	if tracing.Enabled() {
-		r.Use(tracing.Middleware()...)
-	}
-	r.Use(middleware.Metrics())
-	if !common.DisableGZIP {
-		klog.Info("GZIP compression is enabled")
-		r.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/metrics"})))
-	}
-	r.Use(gin.Recovery())
-	r.Use(middleware.Logger())
-	r.Use(middleware.CORS())
-	model.InitDB()
-	if err := tracing.InstrumentDB(model.DB); err != nil {
-		klog.Warningf("Failed to instrument database for tracing: %v", err)
-	}
-	rbac.InitRBAC()
-	handlers.InitTemplates()
-	internal.LoadConfigFromEnv()
 
-	cm, err := cluster.NewClusterManager()
+	appCtx, cancelApp := context.WithCancel(context.Background())
+
+	cm, err := initializeApp(appCtx)
 	if err != nil {
-		log.Fatalf("Failed to create ClusterManager: %v", err)
+		cancelApp()
+		log.Fatalf("Failed to initialize app: %v", err)
 	}
-
-	base := r.Group(common.Base)
-	// Setup router
-	setupAPIRouter(base, cm)
-	setupStatic(r)
+	defer cancelApp()
 
 	srv := &http.Server{
-		Addr:    ":" + common.Port,
-		Handler: r.Handler(),
+		Addr:              ":" + common.Port,
+		Handler:           buildEngine(cm).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -269,6 +71,7 @@ func main() {
 	<-quit
 
 	klog.Info("Shutting down server...")
+	cancelApp()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	shutdownErr := srv.Shutdown(ctx)

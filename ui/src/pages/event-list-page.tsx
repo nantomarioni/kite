@@ -1,16 +1,27 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { Event } from 'kubernetes-types/core/v1'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
+import { createSearchFilter } from '@/lib/k8s'
 import { formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ResourceTable } from '@/components/resource-table'
 
+const eventSearchFilter = createSearchFilter<Event>(
+  (e) => e.metadata?.name,
+  (e) => e.reason,
+  (e) => e.message,
+  (e) => e.type,
+  (e) => e.involvedObject?.name,
+  (e) => e.involvedObject?.kind
+)
+
+const columnHelper = createColumnHelper<Event>()
+
 export function EventListPage() {
   const { t } = useTranslation()
-  const columnHelper = createColumnHelper<Event>()
 
   const columns = useMemo(
     () => [
@@ -37,10 +48,7 @@ export function EventListPage() {
             return (
               <div className="flex flex-col gap-0.5">
                 <div className="text-xs text-muted-foreground">{kind}</div>
-                <Link
-                  to={link}
-                  className="font-medium text-blue-500 hover:underline text-sm"
-                >
+                <Link to={link} className="font-medium app-link text-sm">
                   {name}
                 </Link>
               </div>
@@ -50,7 +58,7 @@ export function EventListPage() {
       ),
       columnHelper.accessor((row) => row.type, {
         id: 'type',
-        header: t('events.type'),
+        header: t('common.fields.type'),
         enableColumnFilter: true,
         cell: ({ getValue }) => {
           const type = getValue() || ''
@@ -60,14 +68,14 @@ export function EventListPage() {
       }),
       columnHelper.accessor((row) => row.reason, {
         id: 'reason',
-        header: t('events.reason'),
+        header: t('common.fields.reason'),
         cell: ({ getValue }) => (
           <div className="font-medium">{getValue() || '-'}</div>
         ),
       }),
       columnHelper.accessor((row) => row.message, {
         id: 'message',
-        header: t('events.message'),
+        header: t('common.fields.message'),
         cell: ({ getValue }) => (
           <div className="text-sm max-w-md whitespace-pre-wrap break-words">
             {getValue() || '-'}
@@ -76,16 +84,16 @@ export function EventListPage() {
       }),
       columnHelper.accessor((row) => row.reportingComponent, {
         id: 'source',
-        header: t('events.source'),
+        header: t('common.fields.source'),
         cell: ({ getValue }) => (
           <div className="text-muted-foreground text-sm max-w-sm whitespace-pre-wrap break-words">
             {getValue() || '-'}
           </div>
         ),
       }),
-      columnHelper.accessor((row) => row.count, {
+      columnHelper.accessor((row) => row.count ?? 1, {
         id: 'count',
-        header: t('events.count'),
+        header: t('common.fields.count'),
         cell: ({ getValue }) => {
           const count = getValue() || 1
           return <span className="text-muted-foreground text-sm">{count}</span>
@@ -96,7 +104,7 @@ export function EventListPage() {
           row.lastTimestamp || row.eventTime || row.metadata?.creationTimestamp,
         {
           id: 'lastSeen',
-          header: t('events.lastSeen'),
+          header: t('common.fields.lastSeen'),
           cell: ({ getValue }) => {
             const dateStr = formatDate(getValue() || '')
             return (
@@ -106,20 +114,8 @@ export function EventListPage() {
         }
       ),
     ],
-    [columnHelper, t]
+    [t]
   )
-
-  const eventSearchFilter = useCallback((event: Event, query: string) => {
-    const lowerQuery = query.toLowerCase()
-    return (
-      (event.metadata?.name?.toLowerCase() || '').includes(lowerQuery) ||
-      (event.reason?.toLowerCase() || '').includes(lowerQuery) ||
-      (event.message?.toLowerCase() || '').includes(lowerQuery) ||
-      (event.type?.toLowerCase() || '').includes(lowerQuery) ||
-      (event.involvedObject?.name?.toLowerCase() || '').includes(lowerQuery) ||
-      (event.involvedObject?.kind?.toLowerCase() || '').includes(lowerQuery)
-    )
-  }, [])
 
   return (
     <ResourceTable<Event>

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import Editor from '@monaco-editor/react'
-import { editor as monacoEditor } from 'monaco-editor'
-
+import { MonacoEditor } from '@/lib/monaco-loader'
+import {
+  defineMonacoBackgroundThemes,
+  useMonacoBackgroundColor,
+} from '@/lib/monaco-theme'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAppearance } from '@/components/appearance-provider'
 
@@ -9,60 +11,63 @@ interface TextViewerProps {
   value: string
   title?: string
   className?: string
+  fillHeight?: boolean
 }
 
 export function TextViewer({
   value,
   title = 'Text',
   className,
+  fillHeight = false,
 }: TextViewerProps) {
-  const [editorValue, setEditorValue] = useState(value)
-  const { actualTheme } = useAppearance()
-
-  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null)
-
-  // Update editor value when value prop changes
-  useEffect(() => {
-    setEditorValue(value)
-  }, [value])
-
-  const handleEditorDidMount = (editor: monacoEditor.IStandaloneCodeEditor) => {
-    editorRef.current = editor
-  }
+  const { actualTheme, colorTheme } = useAppearance()
+  const themeMode = actualTheme === 'dark' ? 'dark' : 'light'
+  const backgroundColor = useMonacoBackgroundColor(
+    '--card',
+    themeMode,
+    colorTheme
+  )
+  const darkThemeName = `text-viewer-dark-${colorTheme}`
+  const lightThemeName = `text-viewer-light-${colorTheme}`
 
   return (
-    <Card className={className}>
+    <Card className={cn(fillHeight && 'flex min-h-0 flex-col', className)}>
       <CardHeader className="flex flex-row items-center justify-between">
         <div className="space-y-1">
           <CardTitle>{title}</CardTitle>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <div className="overflow-hidden h-[calc(100dvh-300px)]">
-            <Editor
+      <CardContent className={cn(fillHeight && 'min-h-0 flex-1')}>
+        <div
+          className={cn(
+            'space-y-2',
+            fillHeight && 'flex h-full min-h-0 flex-col'
+          )}
+        >
+          <div
+            className={cn(
+              'overflow-hidden h-[calc(100dvh-300px)]',
+              fillHeight && 'h-auto min-h-0 flex-1'
+            )}
+          >
+            <MonacoEditor
+              key={`text-viewer-${colorTheme}-${actualTheme}-${backgroundColor}`}
+              height={fillHeight ? '100%' : undefined}
               language="yaml"
-              theme={actualTheme === 'dark' ? 'custom-dark' : 'custom-vs'}
-              value={editorValue}
+              theme={actualTheme === 'dark' ? darkThemeName : lightThemeName}
+              value={value}
+              loading={
+                <div className="flex h-full items-center justify-center text-muted-foreground">
+                  Loading editor...
+                </div>
+              }
               beforeMount={(monaco) => {
-                monaco.editor.defineTheme('custom-dark', {
-                  base: 'vs-dark',
-                  inherit: true,
-                  rules: [],
-                  colors: {
-                    'editor.background': '#18181b',
-                  },
-                })
-                monaco.editor.defineTheme('custom-vs', {
-                  base: 'vs',
-                  inherit: true,
-                  rules: [],
-                  colors: {
-                    'editor.background': '#ffffff',
-                  },
+                defineMonacoBackgroundThemes(monaco, {
+                  darkThemeName,
+                  lightThemeName,
+                  backgroundColor,
                 })
               }}
-              onMount={handleEditorDidMount}
               options={{
                 readOnly: true,
                 minimap: { enabled: false },
@@ -81,11 +86,9 @@ export function TextViewer({
                 quickSuggestions: false,
                 suggestOnTriggerCharacters: false,
                 wordBasedSuggestions: 'off',
-                // Disable unnecessary features for YAML editing
                 parameterHints: { enabled: false },
                 hover: { enabled: false },
                 contextmenu: false,
-                // Better scrolling behavior
                 smoothScrolling: true,
                 cursorSmoothCaretAnimation: 'on',
                 multiCursorModifier: 'alt',

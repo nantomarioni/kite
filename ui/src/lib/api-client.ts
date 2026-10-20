@@ -1,18 +1,15 @@
-// API client with authentication support
+import type { APIRequestOptions } from '@kite-dev/plugin-sdk/api'
+
+import { appendCurrentClusterHeader } from './current-cluster'
 import { withSubPath } from './subpath'
 
 class ApiClient {
   private baseUrl: string = ''
   private isRefreshing = false
   private refreshPromise: Promise<void> | null = null
-  private getCurrentCluster: (() => string | null) | null = null
 
   constructor(baseUrl: string = '') {
     this.baseUrl = baseUrl
-  }
-
-  setClusterProvider(provider: () => string | null) {
-    this.getCurrentCluster = provider
   }
 
   private async refreshToken(): Promise<void> {
@@ -38,77 +35,83 @@ class ApiClient {
     return this.refreshPromise
   }
 
-  private async makeRequest<T>(
+  async request(
     url: string,
-    options: RequestInit = {}
-  ): Promise<T> {
+    options: APIRequestOptions = {}
+  ): Promise<Response> {
     const fullUrl = withSubPath(this.baseUrl + url)
 
-    const headers: Record<string, string> = {
-      ...(options.headers as Record<string, string>),
-    }
+    const defaultHeaders: Record<string, string> = {}
+    appendCurrentClusterHeader(defaultHeaders)
+
+    const headers = new Headers(defaultHeaders)
+    new Headers(options.headers).forEach((value, name) => {
+      headers.set(name, value)
+    })
 
     // Only set default Content-Type to application/json if not already set and body is not FormData
-    if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json'
-    }
-
-    // Add cluster header if available
-    const currentCluster = this.getCurrentCluster?.()
-    if (currentCluster) {
-      headers['x-cluster-name'] = currentCluster
+    if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+      headers.set('Content-Type', 'application/json')
     }
 
     const defaultOptions: RequestInit = {
       credentials: 'include',
-      headers,
       ...options,
+      headers,
     }
 
     try {
       let response = await fetch(fullUrl, defaultOptions)
 
-      // Handle authentication errors with automatic retry
-      if (response.status === 401) {
+      if (response.status === 401 && options.retryOnUnauthorized !== false) {
         try {
-          // Try to refresh the token
           await this.refreshToken()
-          // Retry the original request
           response = await fetch(fullUrl, defaultOptions)
         } catch (refreshError) {
           console.error('Token refresh failed:', refreshError)
           window.location.href = withSubPath('/login')
-          throw new Error('Authentication failed')
+          throw new Error('Authentication failed', { cause: refreshError })
         }
       }
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(
-          errorData.error || `HTTP error! status: ${response.status}`
-        )
-      }
-
-      const contentType = response.headers.get('content-type')
-      if (contentType && contentType.includes('application/json')) {
-        return await response.json()
-      } else {
-        return (await response.text()) as T
-      }
+      return response
     } catch (error) {
-      console.error('API request failed:', error)
+      if (!options.signal?.aborted) {
+        console.error('API request failed:', error)
+      }
       throw error
     }
   }
 
-  async get<T>(url: string, options?: RequestInit): Promise<T> {
+  private async makeRequest<T>(
+    url: string,
+    options: APIRequestOptions = {}
+  ): Promise<T> {
+    const response = await this.request(url, options)
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(
+        errorData.error || `HTTP error! status: ${response.status}`
+      )
+    }
+
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json()
+    }
+
+    return (await response.text()) as T
+  }
+
+  async get<T>(url: string, options?: APIRequestOptions): Promise<T> {
     return this.makeRequest<T>(url, { ...options, method: 'GET' })
   }
 
   async post<T>(
     url: string,
     data?: unknown,
-    options?: RequestInit
+    options?: APIRequestOptions
   ): Promise<T> {
     const isFormData = data instanceof FormData
     return this.makeRequest<T>(url, {
@@ -122,7 +125,11 @@ class ApiClient {
     })
   }
 
-  async put<T>(url: string, data?: unknown, options?: RequestInit): Promise<T> {
+  async put<T>(
+    url: string,
+    data?: unknown,
+    options?: APIRequestOptions
+  ): Promise<T> {
     const isFormData = data instanceof FormData
     return this.makeRequest<T>(url, {
       ...options,
@@ -135,14 +142,14 @@ class ApiClient {
     })
   }
 
-  async delete<T>(url: string, options?: RequestInit): Promise<T> {
+  async delete<T>(url: string, options?: APIRequestOptions): Promise<T> {
     return this.makeRequest<T>(url, { ...options, method: 'DELETE' })
   }
 
   async patch<T>(
     url: string,
     data?: unknown,
-    options?: RequestInit
+    options?: APIRequestOptions
   ): Promise<T> {
     const isFormData = data instanceof FormData
     return this.makeRequest<T>(url, {
@@ -161,3 +168,4 @@ export const API_BASE_URL = '/api/v1'
 
 // Create a singleton instance
 export const apiClient = new ApiClient(API_BASE_URL)
+export const authApiClient = new ApiClient('/api')

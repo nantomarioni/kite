@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/contexts/auth-context'
-import { Plus, Settings } from 'lucide-react'
+import { useTerminal } from '@/contexts/terminal-context'
+import { Plus, Settings, TerminalSquare } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -18,8 +19,11 @@ import { UserMenu } from './user-menu'
 export function SiteHeader() {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, capabilities } = useAuth()
+  const { toggleTerminal, isOpen } = useTerminal()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const isAdmin = user?.isAdmin() ?? false
+  const kubectlEnabled = capabilities.kubectlEnabled
 
   return (
     <>
@@ -38,13 +42,27 @@ export function SiteHeader() {
               onClick={() => setCreateDialogOpen(true)}
               aria-label="Create new resource"
             />
+            {isAdmin && kubectlEnabled && (
+              <button
+                onClick={toggleTerminal}
+                title="Kubectl Terminal"
+                aria-label="Toggle Kubectl Terminal"
+                className={`flex items-center justify-center rounded-sm p-1 transition-colors ${
+                  isOpen
+                    ? 'text-green-500 hover:text-green-600'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <TerminalSquare className="h-5 w-5" />
+              </button>
+            )}
             {!isMobile && (
               <>
                 <Separator
                   orientation="vertical"
                   className="mx-2 data-[orientation=vertical]:h-4"
                 />
-                {user?.isAdmin() && (
+                {isAdmin && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -64,10 +82,12 @@ export function SiteHeader() {
         </div>
       </header>
 
-      <CreateResourceDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-      />
+      {createDialogOpen ? (
+        <CreateResourceDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+        />
+      ) : null}
     </>
   )
 }

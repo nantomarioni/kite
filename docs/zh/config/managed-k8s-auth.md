@@ -25,7 +25,7 @@ title: 托管 Kubernetes 集群配置
 kite 提供了一个辅助创建的脚本
 
 ```sh
-wget https://raw.githubusercontent.com/zxh326/kite/refs/heads/main/scripts/generate-kite-kubeconfig.sh -O generate-kite-kubeconfig.sh
+wget https://raw.githubusercontent.com/kite-org/kite/refs/heads/main/scripts/generate-kite-kubeconfig.sh -O generate-kite-kubeconfig.sh
 chmod +x generate-kite-kubeconfig.sh
 ./generate-kite-kubeconfig.sh
 ```

@@ -5,6 +5,9 @@
 *.so
 *.dylib
 
+#SQLite dev.db
+dev.db
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -43,3 +46,8 @@ docs/.vitepress/cache
 
 kite
 !charts/kite
+
+
+.gocache/
+
+/data/plugins/

@@ -1,21 +1,19 @@
 import { useMemo, useState } from 'react'
-import { IconExternalLink, IconLoader } from '@tabler/icons-react'
+import { IconLoader } from '@tabler/icons-react'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { RelatedResources, ResourceType } from '@/types/api'
 import { useRelatedResources } from '@/lib/api'
 import { getCRDResourcePath, isStandardK8sResource } from '@/lib/k8s'
-import { withSubPath } from '@/lib/subpath'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
+  getResourceDetailPath,
+  getResourceMetadata,
+} from '@/lib/resource-catalog'
+import { Dialog, DialogTrigger } from '@/components/ui/dialog'
+import { ResourceIframeDialogContent } from '@/components/resource-iframe-dialog-content'
 
 import { Column, SimpleTable } from './simple-table'
 import { Badge } from './ui/badge'
-import { Button } from './ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 
 export function RelatedResourcesTable(props: {
@@ -79,35 +77,41 @@ export function RelatedResourcesTable(props: {
 
 function RelatedResourceCell({ rs }: { rs: RelatedResources }) {
   const [open, setOpen] = useState(false)
+  const [searchParams] = useSearchParams()
+  const metadata = getResourceMetadata(rs.type)
+  const isIframe = searchParams.get('iframe') === 'true'
 
   const path = useMemo(() => {
     if (isStandardK8sResource(rs.type)) {
-      return `/${rs.type}/${rs.namespace ? `${rs.namespace}/` : ''}${rs.name}`
+      return getResourceDetailPath(
+        metadata?.type || rs.type,
+        rs.name,
+        rs.namespace
+      )
     }
     return getCRDResourcePath(rs.type, rs.apiVersion!, rs.namespace, rs.name)
-  }, [rs])
+  }, [metadata?.type, rs])
+
+  if (isIframe) {
+    return (
+      <Link
+        to={`${path}?iframe=true`}
+        className="font-medium app-link cursor-pointer"
+      >
+        {rs.name}
+      </Link>
+    )
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <div className="font-medium text-blue-500 hover:underline cursor-pointer">
-          {rs.name}
-        </div>
+        <div className="font-medium app-link cursor-pointer">{rs.name}</div>
       </DialogTrigger>
-      <DialogContent className="!max-w-[60%] !h-[80%] flex flex-col">
-        <DialogHeader className="flex flex-row justify-between items-center">
-          <DialogTitle className="capitalize">{rs.type}</DialogTitle>
-          <a href={withSubPath(path)} target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" size="icon">
-              <IconExternalLink size={12} />
-            </Button>
-          </a>
-        </DialogHeader>
-        <iframe
-          src={`${withSubPath(path)}?iframe=true`}
-          className="w-full flex-grow border-none"
-        />
-      </DialogContent>
+      <ResourceIframeDialogContent
+        title={metadata?.singularLabel || rs.type}
+        path={path}
+      />
     </Dialog>
   )
 }

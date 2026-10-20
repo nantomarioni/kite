@@ -5,7 +5,7 @@ This guide provides detailed instructions for installing Kite in a Kubernetes en
 ## Prerequisites
 
 - `kubectl` with cluster administrator privileges
-- Helm v3 (recommended for Helm installation)
+- Helm v4, or Helm v3.8+ for OCI chart installation
 - MySQL/PostgreSQL database, or local storage for sqlite
 
 ## Installation Methods
@@ -14,9 +14,17 @@ This guide provides detailed instructions for installing Kite in a Kubernetes en
 
 Using Helm provides flexibility for configuration and upgrades:
 
+Install from OCI registry:
+
+```bash
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system --create-namespace
+```
+
+Or install from Helm repository:
+
 ```bash
 # Add Kite repository
-helm repo add kite https://zxh326.github.io/kite
+helm repo add kite https://charts.kitehq.dev
 
 # Update repository information
 helm repo update
@@ -34,6 +42,9 @@ For complete configuration, refer to [Chart Values](../config/chart-values).
 Install with custom values:
 
 ```bash
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system -f values.yaml
+
+# Or use the Helm repository
 helm install kite kite/kite -n kite-system -f values.yaml
 ```
 
@@ -41,8 +52,14 @@ helm install kite kite/kite -n kite-system -f values.yaml
 
 For quick deployment, you can directly apply the official installation YAML:
 
+::: warning
+This method is not suitable for production environments, as it does not include any configuration related to persistence. You need to manually mount the persistence volume and set the environment variable `DB_DSN=/data/db.sqlite` to ensure that data is not lost. Alternatively, you can use an external database.
+
+see [Persistence Issues](../faq#persistence-issues) for more details.
+:::
+
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/zxh326/kite/main/deploy/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/kite-org/kite/main/deploy/install.yaml
 ```
 
 This method will install Kite with default configuration. For advanced customization, it's recommended to use the Helm Chart.
@@ -120,7 +137,7 @@ basePath: "/kite"
 - Or with Helm CLI:
 
 ```fish
-helm install kite kite/kite -n kite-system --create-namespace --set basePath="/kite"
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system --create-namespace --set basePath="/kite"
 ```
 
 Important notes:
@@ -175,7 +192,7 @@ helm uninstall kite -n kite-system
 ### YAML Uninstall
 
 ```bash
-kubectl delete -f https://raw.githubusercontent.com/zxh326/kite/main/deploy/install.yaml
+kubectl delete -f https://raw.githubusercontent.com/kite-org/kite/main/deploy/install.yaml
 ```
 
 ## Next Steps

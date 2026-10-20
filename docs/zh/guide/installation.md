@@ -5,7 +5,7 @@
 ## 前提条件
 
 - 拥有集群管理员权限的 `kubectl`
-- Helm v3（推荐使用 Helm 安装）
+- Helm v4，或支持 OCI chart 的 Helm v3.8+
 - MySQL/PostgreSQL 数据库，或本地存储用于 sqlite
 
 ## 安装方式
@@ -15,9 +15,14 @@
 使用 Helm 可灵活配置和升级 Kite：
 
 ```bash
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system --create-namespace
+```
 
+或从 Helm 仓库安装：
+
+```bash
 # 添加 Kite 仓库
-helm repo add kite https://zxh326.github.io/kite
+helm repo add kite https://charts.kitehq.dev
 
 # 更新仓库信息
 helm repo update
@@ -35,6 +40,9 @@ helm install kite kite/kite -n kite-system --create-namespace
 使用自定义值安装：
 
 ```bash
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system -f values.yaml
+
+# 或使用 Helm 仓库
 helm install kite kite/kite -n kite-system -f values.yaml
 ```
 
@@ -42,8 +50,14 @@ helm install kite kite/kite -n kite-system -f values.yaml
 
 如需快速部署，可直接应用官方安装 YAML：
 
+::: warning
+此方法不适合生产环境，因为他没有配置任何持久化相关内容，你需要手动挂载持久化卷并设置环境变量 `DB_DSN=/data/db.sqlite` 来确保数据不会丢失。或者也可以使用外部数据库。
+
+参考 [持久化相关](../faq#持久化相关) 获取更多详情。
+:::
+
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/zxh326/kite/main/deploy/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/kite-org/kite/main/deploy/install.yaml
 ```
 
 此方法将使用默认配置安装 Kite。如需高级定制，建议使用 Helm Chart。
@@ -106,39 +120,39 @@ spec:
       secretName: kite-tls
 ```
 
-  ## 在子路径下部署（basePath）
+## 在子路径下部署（basePath）
 
-  如果您希望将 Kite 部署在一个子路径下，例如 `https://example.com/kite`，可以使用 Helm Chart 的 `basePath` 值来配置。
+如果您希望将 Kite 部署在一个子路径下，例如 `https://example.com/kite`，可以使用 Helm Chart 的 `basePath` 值来配置。
 
-  如何设置：
+如何设置：
 
-  - 在 `values.yaml` 中：
+- 在 `values.yaml` 中：
 
-  ```yaml
-  basePath: "/kite"
-  ```
+```yaml
+basePath: "/kite"
+```
 
-  - 或使用 Helm CLI：
+- 或使用 Helm CLI：
 
-  ```fish
-  helm install kite kite/kite -n kite-system --create-namespace --set basePath="/kite"
-  ```
+```fish
+helm install kite oci://ghcr.io/kite-org/charts/kite -n kite-system --create-namespace --set basePath="/kite"
+```
 
-  说明：
+说明：
 
-  - Ingress 配置：确保 Ingress 的 `paths` 与子路径一致，并使用合适的 `pathType`（例如 `Prefix`）。示例：
+- Ingress 配置：确保 Ingress 的 `paths` 与子路径一致，并使用合适的 `pathType`（例如 `Prefix`）。示例：
 
-  ```yaml
-  ingress:
-    enabled: true
-    hosts:
-      - host: kite.example.com
-        paths:
-          - path: /kite
-            pathType: Prefix
-  ```
+```yaml
+ingress:
+  enabled: true
+  hosts:
+    - host: kite.example.com
+      paths:
+        - path: /kite
+          pathType: Prefix
+```
 
-  - OAuth / 重定向：如果启用了 OAuth 或其他外部重定向，请在 OAuth 提供方中将重定向 URL 更新为包含子路径，例如 `https://kite.example.com/kite/oauth/callback`。
+- OAuth / 重定向：如果启用了 OAuth 或其他外部重定向，请在 OAuth 提供方中将重定向 URL 更新为包含子路径，例如 `https://kite.example.com/kite/oauth/callback`。
 
 ## 验证安装
 
@@ -165,7 +179,7 @@ helm uninstall kite -n kite-system
 ### YAML 卸载
 
 ```bash
-kubectl delete -f https://raw.githubusercontent.com/zxh326/kite/main/deploy/install.yaml
+kubectl delete -f https://raw.githubusercontent.com/kite-org/kite/main/deploy/install.yaml
 ```
 
 ## 后续步骤

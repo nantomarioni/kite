@@ -1,14 +1,17 @@
 import { useCallback, useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
-import {
-  clusterScopeResources,
-  ResourceType,
-  ResourceTypeMap,
-} from '@/types/api'
+import { ResourceType, ResourceTypeMap } from '@/types/api'
 import { formatDate } from '@/lib/utils'
 import { ResourceTable } from '@/components/resource-table'
+
+import {
+  getResourceDefinition,
+  getResourceLabel,
+  getResourceScope,
+} from './resource-definitions'
 
 export interface ResourceTableProps {
   resourceType?: ResourceType
@@ -17,18 +20,31 @@ export interface ResourceTableProps {
 export function SimpleListPage<T extends keyof ResourceTypeMap>({
   resourceType,
 }: ResourceTableProps) {
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<ResourceTypeMap[T]>()
-  const isClusterScope =
-    resourceType && clusterScopeResources.includes(resourceType)
+  const { t } = useTranslation()
+  const columnHelper = useMemo(
+    () => createColumnHelper<ResourceTypeMap[T]>(),
+    []
+  )
+  const resourceDefinition = resourceType
+    ? getResourceDefinition(resourceType)
+    : undefined
+  const resourceName = resourceType
+    ? resourceDefinition?.titleKey
+      ? t(resourceDefinition.titleKey, {
+          defaultValue: getResourceLabel(resourceType, true),
+        })
+      : getResourceLabel(resourceType, true)
+    : ''
+  const isClusterScope = resourceType
+    ? getResourceScope(resourceType) === 'cluster'
+    : false
 
-  // Define columns for the service table
   const columns = useMemo(
     () => [
       columnHelper.accessor((row) => row.metadata?.name, {
         header: 'Name',
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link
               to={`/${resourceType}${isClusterScope ? '' : `/${row.original.metadata!.namespace}`}/${row.original.metadata!.name}`}
             >
@@ -61,9 +77,10 @@ export function SimpleListPage<T extends keyof ResourceTypeMap>({
 
   return (
     <ResourceTable
-      resourceName={resourceType}
+      resourceName={resourceName}
+      resourceType={resourceType}
       columns={columns}
-      clusterScope={clusterScopeResources.includes(resourceType)}
+      clusterScope={isClusterScope}
       searchQueryFilter={filter}
     />
   )

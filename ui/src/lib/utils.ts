@@ -56,6 +56,35 @@ export function getAge(timestamp: string): string {
   }
 }
 
+export function isVersionAtLeast(version: string | undefined, target: string) {
+  const parsed = parseVersion(version)
+  const targetParsed = parseVersion(target)
+  if (!parsed || !targetParsed) {
+    return false
+  }
+  for (let i = 0; i < 3; i += 1) {
+    if (parsed[i] > targetParsed[i]) {
+      return true
+    }
+    if (parsed[i] < targetParsed[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+function parseVersion(version: string | undefined) {
+  if (!version) {
+    return null
+  }
+  const cleaned = version.trim().replace(/^v/, '')
+  const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)/)
+  if (!match) {
+    return null
+  }
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
 export function formatDate(timestamp: string, addTo = false): string {
   const date = new Date(timestamp)
   const s = format(date, 'yyyy-MM-dd HH:mm:ss')
@@ -272,12 +301,28 @@ export function isRBACError(errorMessage: string): boolean {
   return !!parseRBACError(errorMessage)
 }
 
+const CRD_NOT_INSTALLED_RE =
+  /no matches for kind "([^"]+)" in version "([^"]+)"/
+
+export function isCRDNotInstalledError(errorMessage: string): boolean {
+  return CRD_NOT_INSTALLED_RE.test(errorMessage)
+}
+
 export function translateError(error: Error | unknown, t: TFunction): string {
   if (!(error instanceof Error)) {
-    return t('common.error', {
+    return t('common.messages.error', {
       error: String(error),
     })
   }
+
+  const crdMatch = CRD_NOT_INSTALLED_RE.exec(error.message)
+  if (crdMatch) {
+    return t('errors.crdNotInstalled', {
+      kind: crdMatch[1],
+      version: crdMatch[2],
+    })
+  }
+
   const rbacInfo = parseRBACError(error.message)
 
   if (!rbacInfo) {

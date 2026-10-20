@@ -13,6 +13,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -29,12 +30,15 @@ type Model struct {
 
 func InitDB() {
 	dsn := common.DBDSN
-
+	level := logger.Silent
+	if klog.V(10).Enabled() {
+		level = logger.Info
+	}
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
 		logger.Config{
 			SlowThreshold: time.Second,
-			LogLevel:      logger.Silent,
+			LogLevel:      level,
 			Colorful:      false,
 		},
 	)
@@ -88,12 +92,20 @@ func InitDB() {
 	}
 	models := []interface{}{
 		User{},
+		PasskeyCredential{},
 		Cluster{},
+		GeneralSetting{},
+		LDAPSetting{},
 		OAuthProvider{},
 		Role{},
 		RoleAssignment{},
 		ResourceHistory{},
 		ResourceTemplate{},
+		PendingSession{},
+		HelmRepository{},
+		ScheduledTask{},
+		Plugin{},
+		PluginSetting{},
 	}
 	for _, model := range models {
 		err = DB.AutoMigrate(model)
@@ -101,7 +113,6 @@ func InitDB() {
 			panic("failed to migrate database: " + err.Error())
 		}
 	}
-
 	sqldb, err := DB.DB()
 	if err == nil {
 		sqldb.SetMaxOpenConns(common.DBMaxOpenConns)

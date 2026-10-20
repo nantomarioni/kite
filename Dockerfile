@@ -1,4 +1,4 @@
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/ui
 
@@ -12,7 +12,7 @@ RUN npm install -g pnpm@10.34.6 && \
 COPY ui/ ./
 RUN pnpm run build
 
-FROM golang:1.25-alpine AS backend-builder
+FROM golang:1.26-alpine AS backend-builder
 
 WORKDIR /app
 

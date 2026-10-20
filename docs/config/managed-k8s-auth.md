@@ -25,7 +25,7 @@ Create a dedicated Service Account for Kite and use its token for authentication
 Kite provides a helper script for creation:
 
 ```sh
-wget https://raw.githubusercontent.com/zxh326/kite/refs/heads/main/scripts/generate-kite-kubeconfig.sh -O generate-kite-kubeconfig.sh
+wget https://raw.githubusercontent.com/kite-org/kite/refs/heads/main/scripts/generate-kite-kubeconfig.sh -O generate-kite-kubeconfig.sh
 chmod +x generate-kite-kubeconfig.sh
 ./generate-kite-kubeconfig.sh
 ```

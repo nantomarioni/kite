@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 export interface WebSocketOptions {
   enabled?: boolean
-  pingInterval?: number
   speedUpdateInterval?: number
   speedResetInterval?: number
   reconnectOnClose?: boolean
@@ -45,7 +44,6 @@ export interface WebSocketActions {
 
 const defaultOptions: Required<WebSocketOptions> = {
   enabled: true,
-  pingInterval: 30000,
   speedUpdateInterval: 500,
   speedResetInterval: 3000,
   reconnectOnClose: false,
@@ -72,7 +70,6 @@ export function useWebSocket(
 
   // Refs for WebSocket and timers
   const wsRef = useRef<WebSocket | null>(null)
-  const pingTimerRef = useRef<NodeJS.Timeout | null>(null)
   const speedUpdateTimerRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null)
   const reconnectAttemptsRef = useRef(0)
@@ -106,15 +103,13 @@ export function useWebSocket(
       wsRef.current.onclose = null
       wsRef.current.onerror = null
       wsRef.current.onmessage = null
-      if (wsRef.current.readyState === WebSocket.OPEN) {
+      if (
+        wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING
+      ) {
         wsRef.current.close()
       }
       wsRef.current = null
-    }
-
-    if (pingTimerRef.current) {
-      clearInterval(pingTimerRef.current)
-      pingTimerRef.current = null
     }
 
     if (speedUpdateTimerRef.current) {
@@ -153,11 +148,12 @@ export function useWebSocket(
             return prev
           }
 
-          prev.uploadSpeed = uploadSpeed
-          prev.downloadSpeed = downloadSpeed
-          prev.totalUploaded = stats.totalUploaded
-          prev.totalDownloaded = stats.totalDownloaded
-          return prev
+          return {
+            uploadSpeed,
+            downloadSpeed,
+            totalUploaded: stats.totalUploaded,
+            totalDownloaded: stats.totalDownloaded,
+          }
         })
 
         // Reset counters after specified interval
@@ -170,19 +166,6 @@ export function useWebSocket(
       }
     }, optsRef.current.speedUpdateInterval)
   }, [])
-
-  // Start ping timer
-  const startPingTimer = useCallback(() => {
-    if (pingTimerRef.current) return
-
-    pingTimerRef.current = setInterval(() => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const pingMessage = JSON.stringify({ type: 'ping' })
-        wsRef.current.send(pingMessage)
-        updateNetworkStats(new Blob([pingMessage]).size, true)
-      }
-    }, optsRef.current.pingInterval)
-  }, [updateNetworkStats])
 
   // Store callbacks in refs to avoid recreating connect function
   const callbacksRef = useRef(callbacks)
@@ -229,7 +212,6 @@ export function useWebSocket(
 
         // Start timers
         startSpeedUpdateTimer()
-        startPingTimer()
 
         callbacksRef.current.onOpen?.()
       }
@@ -242,10 +224,6 @@ export function useWebSocket(
         setIsConnecting(false)
 
         // Clean up timers
-        if (pingTimerRef.current) {
-          clearInterval(pingTimerRef.current)
-          pingTimerRef.current = null
-        }
         if (speedUpdateTimerRef.current) {
           clearInterval(speedUpdateTimerRef.current)
           speedUpdateTimerRef.current = null
@@ -326,13 +304,7 @@ export function useWebSocket(
       )
       setIsConnecting(false)
     }
-  }, [
-    url,
-    cleanupResources,
-    startSpeedUpdateTimer,
-    startPingTimer,
-    updateNetworkStats,
-  ])
+  }, [url, cleanupResources, startSpeedUpdateTimer, updateNetworkStats])
 
   // Send message
   const send = useCallback(
@@ -373,21 +345,21 @@ export function useWebSocket(
   // Main effect for connection lifecycle
   useEffect(() => {
     isMountedRef.current = true
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     if (optsRef.current.enabled) {
       // Add a small delay to prevent rapid reconnections
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         if (isMountedRef.current && optsRef.current.enabled) {
           connect()
         }
       }, 100)
-
-      return () => {
-        clearTimeout(timer)
-      }
     }
 
     return () => {
+      if (timer) {
+        clearTimeout(timer)
+      }
       isMountedRef.current = false
       cleanupResources()
     }

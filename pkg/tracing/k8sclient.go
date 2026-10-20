@@ -155,7 +155,7 @@ func k8sTypeName(obj any) string {
 	if tp == nil {
 		return "Unknown"
 	}
-	for tp.Kind() == reflect.Ptr {
+	for tp.Kind() == reflect.Pointer {
 		tp = tp.Elem()
 	}
 	if tp.Name() == "" {
@@ -313,6 +313,13 @@ func (t *k8sTracedClient) Apply(ctx context.Context, obj runtime.ApplyConfigurat
 	if !k8sTraceable(ctx) {
 		return t.Client.Apply(ctx, obj, opts...)
 	}
+	return k8sRunResult(ctx, k8sApplyOp(obj), func(ctx context.Context) error {
+		return t.Client.Apply(ctx, obj, opts...)
+	}, nil)
+}
+
+// k8sApplyOp describes a server-side apply of an apply configuration.
+func k8sApplyOp(obj runtime.ApplyConfiguration) k8sOp {
 	o := k8sOp{op: "Apply", source: k8sSourceAPI}
 	switch ac := obj.(type) {
 	case runtime.Unstructured:
@@ -330,9 +337,7 @@ func (t *k8sTracedClient) Apply(ctx context.Context, obj runtime.ApplyConfigurat
 	if o.gvk.Kind == "" {
 		o.gvk.Kind = k8sTypeName(obj)
 	}
-	return k8sRunResult(ctx, o, func(ctx context.Context) error {
-		return t.Client.Apply(ctx, obj, opts...)
-	}, nil)
+	return o
 }
 
 func k8sDeref(s *string) string {
@@ -395,6 +400,18 @@ func (s *k8sTracedSubResourceWriter) Patch(ctx context.Context, obj client.Objec
 	}
 	return k8sRunResult(ctx, s.op("Patch", obj), func(ctx context.Context) error {
 		return s.w.Patch(ctx, obj, patch, opts...)
+	}, nil)
+}
+
+// Apply implements client.SubResourceWriter (server-side apply).
+func (s *k8sTracedSubResourceWriter) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+	if !k8sTraceable(ctx) {
+		return s.w.Apply(ctx, obj, opts...)
+	}
+	o := k8sApplyOp(obj)
+	o.subResource = s.subResource
+	return k8sRunResult(ctx, o, func(ctx context.Context) error {
+		return s.w.Apply(ctx, obj, opts...)
 	}, nil)
 }
 

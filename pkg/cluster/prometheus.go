@@ -18,9 +18,6 @@ var discoveryLabels = []client.MatchingLabels{
 		"app.kubernetes.io/name": "prometheus",
 	},
 	{
-		"app.kubernetes.io/instance": "vm",
-	},
-	{
 		"app.kubernetes.io/part-of": "kube-prometheus-stack",
 	},
 	{
@@ -39,7 +36,13 @@ func discoveryPrometheusURL(kc *kube.K8sClient) string {
 		}
 		for _, svc := range svcList.Items {
 			if svc.Spec.Type == corev1.ServiceTypeClusterIP || svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+				if svc.Spec.ClusterIP == corev1.ClusterIPNone {
+					continue
+				}
 				for _, port := range svc.Spec.Ports {
+					if port.Port != 9090 && port.Port != 8428 && port.Port != 8429 {
+						continue
+					}
 					return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svc.Name, svc.Namespace, port.Port)
 				}
 			}

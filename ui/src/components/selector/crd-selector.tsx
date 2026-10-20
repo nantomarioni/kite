@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CustomResourceDefinition } from 'kubernetes-types/apiextensions/v1'
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { useResources } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -15,6 +16,8 @@ import {
 interface CRDSelectorProps {
   selectedCRD?: string
   onCRDChange: (crdName: string, kind: string) => void
+  onAPIGroupAdd?: (groupName: string) => void
+  addedAPIGroups?: string[]
   placeholder?: string
   disabled?: boolean
 }
@@ -30,9 +33,12 @@ type CRDOption = {
 export function CRDSelector({
   selectedCRD,
   onCRDChange,
+  onAPIGroupAdd,
+  addedAPIGroups = [],
   placeholder = 'Select CRD...',
   disabled = false,
 }: CRDSelectorProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
 
@@ -121,19 +127,19 @@ export function CRDSelector({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="justify-between min-w-[200px]"
+          className="w-full min-w-0 justify-between md:w-auto md:min-w-[200px]"
         >
           <span
-            className={
+            className={`truncate ${
               selectedCRD ? 'text-foreground' : 'text-muted-foreground'
-            }
+            }`}
           >
             {selectedCRDData ? selectedCRDData.name : placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[400px] p-0">
+      <PopoverContent className="w-[calc(100vw-1rem)] max-w-[400px] p-0 md:w-[400px]">
         <div className="p-2 border-b">
           <Input
             placeholder="Search CRDs..."
@@ -154,8 +160,31 @@ export function CRDSelector({
           ) : (
             Object.entries(filteredCRDGroups).map(([groupName, crds]) => (
               <div key={groupName}>
-                <div className="px-3 py-2 text-xs font-medium uppercase text-muted-foreground">
-                  {groupName}
+                <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+                  <span className="truncate uppercase">{groupName}</span>
+                  {onAPIGroupAdd && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-xs"
+                      disabled={addedAPIGroups.includes(groupName)}
+                      onClick={() => {
+                        onAPIGroupAdd(groupName)
+                        setOpen(false)
+                        setSearchTerm('')
+                      }}
+                    >
+                      {addedAPIGroups.includes(groupName) ? (
+                        <Check className="size-3.5" />
+                      ) : (
+                        <Plus className="size-3.5" />
+                      )}
+                      {addedAPIGroups.includes(groupName)
+                        ? t('sidebar.added', 'Added')
+                        : t('sidebar.addAPIGroup', 'Add Group')}
+                    </Button>
+                  )}
                 </div>
                 <div className="pb-2">
                   {crds.map((crd) => {

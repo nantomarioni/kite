@@ -1,23 +1,28 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { Job } from 'kubernetes-types/batch/v1'
 import { Link } from 'react-router-dom'
 
+import { createSearchFilter } from '@/lib/k8s'
 import { formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ResourceTable } from '@/components/resource-table'
 
-export function JobListPage() {
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<Job>()
+const jobSearchFilter = createSearchFilter<Job>(
+  (j) => j.metadata?.name,
+  (j) => j.metadata?.namespace
+)
 
+const columnHelper = createColumnHelper<Job>()
+
+export function JobListPage() {
   // Define columns for the job table
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
         header: 'Name',
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link
               to={`/jobs/${row.original.metadata!.namespace}/${
                 row.original.metadata!.name
@@ -28,30 +33,44 @@ export function JobListPage() {
           </div>
         ),
       }),
-      columnHelper.accessor('status.conditions', {
-        header: 'Status',
-        cell: ({ row }) => {
-          const conditions = row.original.status?.conditions || []
-          const completedCondition = conditions.find(
-            (c) => c.type === 'Complete'
-          )
-          const failedCondition = conditions.find((c) => c.type === 'Failed')
-
-          let status = 'Running'
-          let variant: 'default' | 'destructive' | 'secondary' = 'secondary'
-
-          if (completedCondition?.status === 'True') {
-            status = 'Complete'
-            variant = 'default'
-          } else if (failedCondition?.status === 'True') {
-            status = 'Failed'
-            variant = 'destructive'
+      columnHelper.accessor(
+        (row) => {
+          const conditions = row.status?.conditions || []
+          if (
+            conditions.some(
+              (condition) =>
+                condition.type === 'Complete' && condition.status === 'True'
+            )
+          ) {
+            return 'Complete'
           }
-
-          return <Badge variant={variant}>{status}</Badge>
+          if (
+            conditions.some(
+              (condition) =>
+                condition.type === 'Failed' && condition.status === 'True'
+            )
+          ) {
+            return 'Failed'
+          }
+          return 'Running'
         },
-      }),
-      columnHelper.accessor((row) => row.status, {
+        {
+          id: 'status_conditions',
+          header: 'Status',
+          cell: ({ getValue }) => {
+            const status = getValue()
+            const variant =
+              status === 'Complete'
+                ? 'default'
+                : status === 'Failed'
+                  ? 'destructive'
+                  : 'secondary'
+
+            return <Badge variant={variant}>{status}</Badge>
+          },
+        }
+      ),
+      columnHelper.accessor((row) => row.status?.succeeded || 0, {
         id: 'completions',
         header: 'Completions',
         cell: ({ row }) => {
@@ -98,16 +117,8 @@ export function JobListPage() {
         },
       }),
     ],
-    [columnHelper]
+    []
   )
-
-  // Custom filter for job search
-  const jobSearchFilter = useCallback((job: Job, query: string) => {
-    return (
-      job.metadata!.name!.toLowerCase().includes(query) ||
-      (job.metadata!.namespace?.toLowerCase() || '').includes(query)
-    )
-  }, [])
 
   return (
     <ResourceTable

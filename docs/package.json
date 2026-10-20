@@ -1,10 +1,11 @@
 {
   "scripts": {
     "docs:dev": "vitepress dev .",
-    "docs:build": "vitepress build .",
+    "docs:build": "git fetch --unshallow || vitepress build .",
     "docs:preview": "vitepress preview ."
   },
   "devDependencies": {
+    "@tabler/icons-vue": "^3.46.0",
     "vitepress": "^1.6.3"
   }
 }

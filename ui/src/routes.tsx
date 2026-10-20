@@ -1,17 +1,21 @@
 import { lazy, Suspense } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 
-import App from './App'
+import App, { StandaloneAIChatApp } from './App'
 import { InitCheckRoute } from './components/init-check-route'
 import { ProtectedRoute } from './components/protected-route'
 import { getSubPath } from './lib/subpath'
 import { CRListPage } from './pages/cr-list-page'
+import { HelmChartDetailPage } from './pages/helm-chart-detail-page'
+import { HelmChartListPage } from './pages/helm-chart-list-page'
 import { InitializationPage } from './pages/initialization'
 import { LoginPage } from './pages/login'
 import { Overview } from './pages/overview'
+import { PluginManagementPage } from './pages/plugins'
 import { ResourceDetail } from './pages/resource-detail'
 import { ResourceList } from './pages/resource-list'
 import { SettingsPage } from './pages/settings'
+import { PluginPage } from './plugins/plugin-page'
 
 const AppView = lazy(() => import('./components/AppView/AppView'))
 
@@ -26,8 +30,18 @@ export const router = createBrowserRouter(
     {
       path: '/login',
       element: (
-        <InitCheckRoute>
+        <InitCheckRoute allowIncompleteSetup>
           <LoginPage />
+        </InitCheckRoute>
+      ),
+    },
+    {
+      path: '/ai-chat-box',
+      element: (
+        <InitCheckRoute>
+          <ProtectedRoute>
+            <StandaloneAIChatApp />
+          </ProtectedRoute>
         </InitCheckRoute>
       ),
     },
@@ -50,6 +64,14 @@ export const router = createBrowserRouter(
           element: <Overview />,
         },
         {
+          path: 'plugins',
+          element: <PluginManagementPage />,
+        },
+        {
+          path: 'plugins/:pluginId/*',
+          element: <PluginPage />,
+        },
+        {
           path: 'settings',
           element: <SettingsPage />,
         },
@@ -64,6 +86,14 @@ export const router = createBrowserRouter(
         {
           path: 'crds/:crd',
           element: <CRListPage />,
+        },
+        {
+          path: 'charts',
+          element: <HelmChartListPage />,
+        },
+        {
+          path: 'charts/:repository/:name',
+          element: <HelmChartDetailPage />,
         },
         {
           path: 'crds/:resource/:namespace/:name',

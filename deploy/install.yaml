@@ -37,7 +37,7 @@ spec:
     spec:
       serviceAccountName: kite
       containers:
-        - image: ghcr.io/zxh326/kite:latest
+        - image: ghcr.io/kite-org/kite:latest
           imagePullPolicy: IfNotPresent
           name: kite
           resources:

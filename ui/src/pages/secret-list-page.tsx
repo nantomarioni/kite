@@ -1,23 +1,30 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { Secret } from 'kubernetes-types/core/v1'
 import { Link } from 'react-router-dom'
 
+import { createSearchFilter } from '@/lib/k8s'
 import { formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ResourceTable } from '@/components/resource-table'
 
-export function SecretListPage() {
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<Secret>()
+const secretSearchFilter = createSearchFilter<Secret>(
+  (s) => s.metadata?.name,
+  (s) => s.metadata?.namespace,
+  (s) => s.type,
+  (s) => Object.keys(s.data || {})
+)
 
+const columnHelper = createColumnHelper<Secret>()
+
+export function SecretListPage() {
   // Define columns for the secret table
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
         header: 'Name',
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link
               to={`/secrets/${row.original.metadata!.namespace}/${
                 row.original.metadata!.name
@@ -28,17 +35,19 @@ export function SecretListPage() {
           </div>
         ),
       }),
-      columnHelper.accessor('type', {
+      columnHelper.accessor((row) => row.type || 'Opaque', {
+        id: 'type',
         header: 'Type',
         cell: ({ getValue }) => {
           const type = getValue() || 'Opaque'
           return <Badge variant="outline">{type}</Badge>
         },
       }),
-      columnHelper.accessor('data', {
+      columnHelper.accessor((row) => Object.keys(row.data || {}).join(', '), {
+        id: 'data',
         header: 'Data Keys',
-        cell: ({ getValue }) => {
-          const data = getValue() || {}
+        cell: ({ row }) => {
+          const data = row.original.data || {}
           const keys = Object.keys(data)
           if (keys.length === 0) {
             return '-'
@@ -64,21 +73,8 @@ export function SecretListPage() {
         },
       }),
     ],
-    [columnHelper]
+    []
   )
-
-  // Custom filter for secret search
-  const secretSearchFilter = useCallback((secret: Secret, query: string) => {
-    const dataKeys = Object.keys(secret.data || {}).join(' ')
-    const type = secret.type || ''
-
-    return (
-      secret.metadata!.name!.toLowerCase().includes(query) ||
-      (secret.metadata!.namespace?.toLowerCase() || '').includes(query) ||
-      type.toLowerCase().includes(query) ||
-      dataKeys.toLowerCase().includes(query)
-    )
-  }, [])
 
   return (
     <ResourceTable

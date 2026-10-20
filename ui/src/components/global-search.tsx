@@ -1,34 +1,30 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ComponentType,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { useSidebarConfig } from '@/contexts/sidebar-config-context'
 import {
-  IconArrowsHorizontal,
-  IconArrowsUpDown,
-  IconBox,
-  IconBoxMultiple,
   IconLayoutDashboard,
-  IconLoadBalancer,
-  IconLoader,
-  IconLock,
-  IconMap,
   IconMoon,
-  IconNetwork,
-  IconPlayerPlay,
-  IconRocket,
-  IconRoute,
-  IconRouter,
   IconServer,
-  IconServer2,
   IconSettings,
   IconStar,
   IconStarFilled,
   IconSun,
-  IconTopologyBus,
 } from '@tabler/icons-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
 import { globalSearch, SearchResult } from '@/lib/api'
+import {
+  getResourceCatalogEntry,
+  getResourceIconComponent,
+} from '@/lib/resource-catalog'
 import { useCluster } from '@/hooks/use-cluster'
 import { useFavorites } from '@/hooks/use-favorites'
 import { Badge } from '@/components/ui/badge'
@@ -47,49 +43,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useAppearance } from '@/components/appearance-provider'
-
-// Define resource types and their display properties
-const RESOURCE_CONFIG: Record<
-  string,
-  {
-    label: string
-    icon: React.ComponentType<{ className?: string }>
-  }
-> = {
-  pods: { label: 'nav.pods', icon: IconBox },
-  deployments: { label: 'nav.deployments', icon: IconRocket },
-  services: { label: 'nav.services', icon: IconNetwork },
-  configmaps: { label: 'nav.configMaps', icon: IconMap },
-  secrets: { label: 'nav.secrets', icon: IconLock },
-  namespaces: {
-    label: 'nav.namespaces',
-    icon: IconBoxMultiple,
-  },
-  nodes: { label: 'nav.nodes', icon: IconServer2 },
-  jobs: { label: 'nav.jobs', icon: IconPlayerPlay },
-  ingresses: { label: 'nav.ingresses', icon: IconRouter },
-  gateways: { label: 'nav.gateways', icon: IconLoadBalancer },
-  httproutes: { label: 'nav.httproutes', icon: IconRoute },
-  daemonsets: {
-    label: 'nav.daemonsets',
-    icon: IconTopologyBus,
-  },
-  horizontalpodautoscalers: {
-    label: 'nav.horizontalpodautoscalers',
-    icon: IconArrowsHorizontal,
-  },
-  verticalpodautoscalers: {
-    label: 'nav.verticalpodautoscalers',
-    icon: IconArrowsUpDown,
-  },
-}
+import { SidebarItemIcon } from '@/components/sidebar-item-icon'
 
 interface SidebarSearchItem {
   id: string
   title: string
   url: string
-  Icon: React.ComponentType<{ className?: string }>
+  Icon: ComponentType<{ className?: string }>
   groupLabel?: string
   searchText: string
   isPinned: boolean
@@ -98,7 +60,7 @@ interface SidebarSearchItem {
 interface ActionSearchItem {
   id: string
   label: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   searchText: string
   onSelect: () => void
 }
@@ -108,11 +70,56 @@ interface GlobalSearchProps {
   onOpenChange: (open: boolean) => void
 }
 
+let cachedSearchResults: SearchResult[] = []
+const cachedSearchResultsByQuery = new Map<string, SearchResult[]>()
+
+function normalizeCachedSearchQuery(query: string) {
+  return query.trim().toLowerCase()
+}
+
+function cacheSearchResults(query: string, results: SearchResult[]) {
+  const key = normalizeCachedSearchQuery(query)
+  if (!key) {
+    return
+  }
+
+  cachedSearchResultsByQuery.set(key, results)
+  cachedSearchResults = results
+  if (cachedSearchResultsByQuery.size > 30) {
+    const oldestKey = cachedSearchResultsByQuery.keys().next().value
+    if (oldestKey) {
+      cachedSearchResultsByQuery.delete(oldestKey)
+    }
+  }
+}
+
+function getCachedPrefixResults(query: string) {
+  const key = normalizeCachedSearchQuery(query)
+  let bestKey = ''
+  let bestResults: SearchResult[] | undefined
+
+  for (const [cachedQuery, results] of cachedSearchResultsByQuery) {
+    if (key.startsWith(cachedQuery) && cachedQuery.length > bestKey.length) {
+      bestKey = cachedQuery
+      bestResults = results
+    }
+  }
+
+  return bestResults
+}
+
 export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[] | null>([])
+  const [results, setResults] = useState<SearchResult[]>(
+    () => cachedSearchResults || []
+  )
+  const [lastSearchResults, setLastSearchResults] = useState<SearchResult[]>(
+    () => cachedSearchResults || []
+  )
   const [isLoading, setIsLoading] = useState(false)
+  const searchRequestIdRef = useRef(0)
+  const mountedRef = useRef(true)
   const navigate = useNavigate()
   const { user } = useAuth()
   const { config, getIconComponent } = useSidebarConfig()
@@ -124,6 +131,14 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
     isSwitching,
     isLoading: isClusterLoading,
   } = useCluster()
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      searchRequestIdRef.current += 1
+    }
+  }, [])
 
   // Simple theme toggle function
   const toggleTheme = useCallback(() => {
@@ -150,12 +165,12 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
         ? [
             {
               id: 'settings',
-              title: t('settings.nav', 'Settings'),
+              title: t('settings.title', 'Settings'),
               url: '/settings',
               Icon: IconSettings,
               groupLabel: 'Settings',
               searchText:
-                `${t('settings.nav', 'Settings')} admin`.toLowerCase(),
+                `${t('settings.title', 'Settings')} admin`.toLowerCase(),
               isPinned: false,
             },
             {
@@ -170,12 +185,12 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
             },
             {
               id: 'oauth',
-              title: t('settings.tabs.oauth', 'OAuth'),
+              title: t('settings.tabs.oauth', 'Authentication'),
               url: '/settings?tab=oauth',
               Icon: IconSettings,
               groupLabel: 'Settings',
               searchText:
-                `${t('settings.tabs.oauth', 'OAuth')} settings oauth admin`.toLowerCase(),
+                `${t('settings.tabs.oauth', 'Authentication')} settings authentication ldap oauth admin`.toLowerCase(),
               isPinned: false,
             },
             {
@@ -217,10 +232,15 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
         .slice()
         .sort((a, b) => a.order - b.order)
         .forEach((item) => {
+          if (item.type === 'apiGroup') {
+            return
+          }
           const title = item.titleKey
             ? t(item.titleKey, { defaultValue: item.titleKey })
             : item.id
-          const Icon = getIconComponent(item.icon)
+          const Icon = getIconComponent(item.icon) as ComponentType<{
+            className?: string | undefined
+          }>
           const searchTerms = [title, groupLabel, item.url, item.titleKey]
             .filter(Boolean)
             .join(' ')
@@ -230,7 +250,9 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
             id: item.id,
             title,
             url: item.url,
-            Icon,
+            Icon: item.pluginId
+              ? (props) => <SidebarItemIcon item={item} {...props} />
+              : Icon,
             groupLabel,
             searchText: searchTerms,
             isPinned: pinnedItems.has(item.id),
@@ -315,56 +337,111 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
     toggleFavorite: toggleResourceFavorite,
   } = useFavorites()
 
-  // Handle favorite toggle
   const toggleFavorite = useCallback(
     (result: SearchResult, event: React.MouseEvent) => {
-      event.stopPropagation() // Prevent item selection
-
+      event.stopPropagation()
       toggleResourceFavorite(result)
-
-      // Refresh results to update favorite status if showing favorites
-      const currentQuery = query
-      setTimeout(() => {
-        if (!currentQuery || currentQuery.length < 2) {
-          setResults(favorites)
-        }
-      }, 0)
     },
-    [query, toggleResourceFavorite, favorites]
+    [toggleResourceFavorite]
   )
 
-  // Debounced search function
-  const performSearch = useCallback(async (searchQuery: string) => {
-    try {
-      setIsLoading(true)
-      const response = await globalSearch(searchQuery, { limit: 10 })
-      setResults(response.results)
-    } catch (error) {
-      console.error('Search failed:', error)
-      setResults([])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
+  const filterResults = useCallback(
+    (items: SearchResult[], searchQuery: string) => {
+      const terms = searchQuery
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
 
-  // Debounce search calls
-  useEffect(() => {
-    if (query.length > 0) {
-      setResults(null)
-    }
-    if (!query || query.length < 2) {
-      if (query.length === 0) {
-        setResults(favorites)
+      if (terms.length === 0) {
+        return items
       }
+
+      return items.filter((item) => {
+        const haystack = `${item.name} ${item.namespace || ''} ${
+          item.resourceType
+        }`.toLowerCase()
+        return terms.every((term) => haystack.includes(term))
+      })
+    },
+    []
+  )
+
+  useEffect(() => {
+    const searchQuery = query.trim()
+    const favoriteResults = favorites || []
+    const previousResults = lastSearchResults || []
+    const isLabelQuery = searchQuery.includes(':') || searchQuery.includes('=')
+    const prefixResults = getCachedPrefixResults(searchQuery)
+    if (!searchQuery) {
+      setResults(favoriteResults.length > 0 ? favoriteResults : previousResults)
       return
     }
+
+    if (isLabelQuery) {
+      setResults(
+        cachedSearchResultsByQuery.get(
+          normalizeCachedSearchQuery(searchQuery)
+        ) || []
+      )
+      return
+    }
+
+    const cachedResults =
+      prefixResults ??
+      (previousResults.length > 0
+        ? previousResults
+        : favoriteResults.length > 0
+          ? favoriteResults
+          : undefined)
+
+    setResults((currentResults) =>
+      filterResults(cachedResults || currentResults, searchQuery)
+    )
+  }, [favorites, filterResults, lastSearchResults, query])
+
+  const performSearch = useCallback(
+    async (searchQuery: string, requestId: number) => {
+      try {
+        const response = await globalSearch(searchQuery, { limit: 10 })
+        if (!mountedRef.current || searchRequestIdRef.current !== requestId) {
+          return
+        }
+        const nextResults = response.results || []
+        cacheSearchResults(searchQuery, nextResults)
+        setLastSearchResults(nextResults)
+        setResults(nextResults)
+      } catch (error) {
+        if (mountedRef.current && searchRequestIdRef.current === requestId) {
+          console.error('Search failed:', error)
+        }
+      } finally {
+        if (mountedRef.current && searchRequestIdRef.current === requestId) {
+          setIsLoading(false)
+        }
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    const searchQuery = query.trim()
+    if (!searchQuery) {
+      searchRequestIdRef.current += 1
+      setIsLoading(false)
+      return
+    }
+
+    const requestId = searchRequestIdRef.current + 1
+    searchRequestIdRef.current = requestId
     setIsLoading(true)
+
     const timeoutId = setTimeout(() => {
-      performSearch(query)
-    }, 300) // 300ms debounce
+      performSearch(searchQuery, requestId)
+    }, 100)
 
     return () => clearTimeout(timeoutId)
-  }, [query, performSearch, favorites])
+  }, [query, performSearch])
 
   // Handle item selection
   const handleSelect = useCallback(
@@ -379,17 +456,19 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
   // Clear state when dialog closes
   useEffect(() => {
     if (!open) {
+      searchRequestIdRef.current += 1
       setQuery('')
-      setResults([])
       setIsLoading(false)
     }
   }, [open])
 
   useEffect(() => {
     if (open && query === '') {
-      setResults(favorites) // Show favorites when dialog opens
+      const favoriteResults = favorites || []
+      const previousResults = lastSearchResults || []
+      setResults(favoriteResults.length > 0 ? favoriteResults : previousResults)
     }
-  }, [open, query, favorites])
+  }, [open, query, favorites, lastSearchResults])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -397,8 +476,8 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
         <DialogTitle>{t('globalSearch.title')}</DialogTitle>
         <DialogDescription>{t('globalSearch.description')}</DialogDescription>
       </DialogHeader>
-      <DialogContent className="overflow-hidden p-0">
-        <Command shouldFilter={false}>
+      <DialogContent className="max-w-4xl gap-0 overflow-hidden p-0 sm:p-0">
+        <Command shouldFilter={false} className="rounded-none">
           <CommandInput
             placeholder={t('globalSearch.placeholder')}
             value={query}
@@ -407,11 +486,23 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
           <CommandList>
             <CommandEmpty>
               {isLoading ? (
-                <div className="flex items-center justify-center gap-2 py-6">
-                  <IconLoader className="h-4 w-4 animate-spin" />
-                  <span>{t('globalSearch.searching')}</span>
+                <div className="space-y-2 p-2">
+                  {[0, 1, 2, 3].map((index) => (
+                    <div key={index} className="flex items-center gap-3 py-2">
+                      <Skeleton className="h-4 w-4 rounded-sm" />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Skeleton
+                          className={
+                            index % 2 === 0 ? 'h-4 w-2/5' : 'h-4 w-1/3'
+                          }
+                        />
+                        <Skeleton className="h-3 w-1/4" />
+                      </div>
+                      <Skeleton className="h-5 w-16" />
+                    </div>
+                  ))}
                 </div>
-              ) : query.length < 2 ? (
+              ) : !query.trim() ? (
                 t('globalSearch.emptyHint')
               ) : (
                 t('globalSearch.noResults')
@@ -490,17 +581,24 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
             {results && results.length > 0 && (
               <CommandGroup
                 heading={
-                  query.length < 2
+                  !query.trim() && (favorites || []).length > 0
                     ? t('globalSearch.favorites')
                     : t('globalSearch.resources')
                 }
               >
                 {results.map((result) => {
-                  const config = RESOURCE_CONFIG[result.resourceType] || {
-                    label: result.resourceType,
-                    icon: IconBox, // Default icon if not found
-                  }
-                  const Icon = config.icon
+                  const metadata = getResourceCatalogEntry(result.resourceType)
+                  const titleKey =
+                    metadata && 'titleKey' in metadata
+                      ? metadata.titleKey
+                      : undefined
+                  const resourceLabel = titleKey
+                    ? t(titleKey, {
+                        defaultValue:
+                          metadata?.pluralLabel || result.resourceType,
+                      })
+                    : metadata?.pluralLabel || result.resourceType
+                  const Icon = getResourceIconComponent(metadata?.icon)
                   const isFav = isFavorite(result.id)
                   const path = result.namespace
                     ? `/${result.resourceType}/${result.namespace}/${result.name}`
@@ -509,8 +607,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                     <CommandItem
                       key={result.id}
                       value={`${result.name} ${result.namespace || ''} ${result.resourceType} ${
-                        RESOURCE_CONFIG[result.resourceType]?.label ||
-                        result.resourceType
+                        resourceLabel
                       }`}
                       onSelect={() => handleSelect(path)}
                       className="flex items-center gap-3 py-3"
@@ -519,14 +616,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{result.name}</span>
-                          <Badge className="text-xs">
-                            {RESOURCE_CONFIG[result.resourceType]?.label
-                              ? t(
-                                  RESOURCE_CONFIG[result.resourceType]
-                                    .label as string
-                                )
-                              : result.resourceType}
-                          </Badge>
+                          <Badge className="text-xs">{resourceLabel}</Badge>
                         </div>
                         {result.namespace && (
                           <div className="text-xs text-muted-foreground mt-1">

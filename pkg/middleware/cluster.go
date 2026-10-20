@@ -1,6 +1,9 @@
 package middleware
 
 import (
+	"net/http"
+	"net/url"
+
 	"github.com/gin-gonic/gin"
 	"github.com/zxh326/kite/pkg/cluster"
 )
@@ -12,21 +15,29 @@ const (
 	PromClientKey     = "prom-client"
 )
 
-// ClusterMiddleware extracts cluster name from header and injects clients into context
-func ClusterMiddleware(cm *cluster.ClusterManager) gin.HandlerFunc {
+type clusterClientSetProvider interface {
+	GetClientSet(string) (*cluster.ClientSet, error)
+}
+
+// ClusterMiddleware selects a cluster from the path, header, or query and injects its clients into context.
+func ClusterMiddleware(cm clusterClientSetProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		clusterName := c.GetHeader(ClusterNameHeader)
+		clusterName := c.Param("cluster")
 		if clusterName == "" {
-			if v, ok := c.GetQuery(ClusterNameHeader); ok {
-				clusterName = v
-			}
-			if clusterName == "" {
-				clusterName, _ = c.Cookie(ClusterNameHeader)
+			clusterName = c.GetHeader(ClusterNameHeader)
+			if clusterName != "" {
+				if decoded, err := url.PathUnescape(clusterName); err == nil {
+					clusterName = decoded
+				}
+			} else {
+				if v, ok := c.GetQuery(ClusterNameHeader); ok {
+					clusterName = v
+				}
 			}
 		}
 		cluster, err := cm.GetClientSet(clusterName)
 		if err != nil {
-			c.JSON(404, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			c.Abort()
 			return
 		}

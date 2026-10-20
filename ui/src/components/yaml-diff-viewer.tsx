@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react'
-import { DiffEditor } from '@monaco-editor/react'
-import { formatHex } from 'culori'
 import * as yaml from 'js-yaml'
-import { editor as monacoEditor } from 'monaco-editor'
+import type { editor as monacoEditor } from 'monaco-editor'
 import { useTranslation } from 'react-i18next'
 
+import { MonacoDiffEditor } from '@/lib/monaco-loader'
+import {
+  defineMonacoBackgroundThemes,
+  useMonacoBackgroundColor,
+} from '@/lib/monaco-theme'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -58,16 +61,12 @@ export function YamlDiffViewer({
 }: YamlDiffViewerProps) {
   const { t } = useTranslation()
   const { actualTheme, colorTheme } = useAppearance()
-
-  const getCardBackgroundColor = () => {
-    const card = getComputedStyle(document.documentElement)
-      .getPropertyValue('--background')
-      .trim()
-    if (!card) {
-      return actualTheme === 'dark' ? '#18181b' : '#ffffff'
-    }
-    return formatHex(card) || (actualTheme === 'dark' ? '#18181b' : '#ffffff')
-  }
+  const themeMode = actualTheme === 'dark' ? 'dark' : 'light'
+  const backgroundColor = useMonacoBackgroundColor(
+    '--background',
+    themeMode,
+    colorTheme
+  )
   const editorRef = useRef<monacoEditor.IStandaloneDiffEditor | null>(null)
   const [diffMode, setDiffMode] = useState<DiffMode>('previous-vs-modified')
 
@@ -202,26 +201,23 @@ export function YamlDiffViewer({
           </DialogTitle>
         </DialogHeader>
         <div className="flex-1 min-h-0">
-          <DiffEditor
+          <MonacoDiffEditor
+            key={`yaml-diff-viewer-${colorTheme}-${actualTheme}-${backgroundColor}`}
             height={height}
             language="yaml"
+            loading={
+              <div
+                className="flex h-full items-center justify-center text-muted-foreground"
+                style={{ height }}
+              >
+                Loading editor...
+              </div>
+            }
             beforeMount={(monaco) => {
-              const cardBgColor = getCardBackgroundColor()
-              monaco.editor.defineTheme(`custom-dark-${colorTheme}`, {
-                base: 'vs-dark',
-                inherit: true,
-                rules: [],
-                colors: {
-                  'editor.background': cardBgColor,
-                },
-              })
-              monaco.editor.defineTheme(`custom-vs-${colorTheme}`, {
-                base: 'vs',
-                inherit: true,
-                rules: [],
-                colors: {
-                  'editor.background': cardBgColor,
-                },
+              defineMonacoBackgroundThemes(monaco, {
+                darkThemeName: `custom-dark-${colorTheme}`,
+                lightThemeName: `custom-vs-${colorTheme}`,
+                backgroundColor,
               })
             }}
             theme={

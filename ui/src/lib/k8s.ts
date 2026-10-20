@@ -1,10 +1,18 @@
+import jsonpath from 'jsonpath'
 import { Deployment } from 'kubernetes-types/apps/v1'
-import { Container, Pod, Service } from 'kubernetes-types/core/v1'
-import { ObjectMeta } from 'kubernetes-types/meta/v1'
+import {
+  Container,
+  ContainerStatus,
+  EphemeralContainer,
+  Event as KubernetesEvent,
+  Pod,
+  Service,
+} from 'kubernetes-types/core/v1'
 
-import { clusterScopeResources, ResourceType } from '@/types/api'
+import { CustomResource } from '@/types/api'
 import { DeploymentStatusType, PodStatus, SimpleContainer } from '@/types/k8s'
 
+import { resourceMetadataList } from './resource-metadata'
 import { getAge } from './utils'
 
 // This function retrieves the status of a Pod in Kubernetes.
@@ -15,6 +23,7 @@ export function getPodStatus(pod?: Pod): PodStatus {
       readyContainers: 0,
       totalContainers: 0,
       reason: 'Unknown',
+      restarts: 0,
       restartString: '0',
     }
   }
@@ -186,8 +195,67 @@ export function getPodStatus(pod?: Pod): PodStatus {
     readyContainers,
     totalContainers,
     reason,
+    restarts,
     restartString: restartsStr,
   }
+}
+
+export type PodPort = {
+  containerName: string
+  port: NonNullable<Container['ports']>[number]
+}
+
+export function getPodPorts(pod: Pod): PodPort[] {
+  return (pod.spec?.containers || []).flatMap((container) =>
+    (container.ports || []).map((port) => ({
+      containerName: container.name,
+      port,
+    }))
+  )
+}
+
+export function getContainerState(status?: ContainerStatus) {
+  if (status?.state?.running) {
+    return 'Running'
+  }
+  if (status?.state?.terminated) {
+    return (
+      status.state.terminated.reason ||
+      (status.state.terminated.exitCode === 0 ? 'Completed' : 'Terminated')
+    )
+  }
+  if (status?.state?.waiting) {
+    return status.state.waiting.reason || 'Waiting'
+  }
+  return 'Waiting'
+}
+
+export function getLastContainerState(status?: ContainerStatus) {
+  if (status?.lastState?.terminated) {
+    const terminated = status.lastState.terminated
+    return [
+      terminated.reason || 'Terminated',
+      terminated.exitCode !== undefined ? `exit ${terminated.exitCode}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ')
+  }
+  if (status?.lastState?.waiting) {
+    return status.lastState.waiting.reason || 'Waiting'
+  }
+  if (status?.lastState?.running) {
+    return 'Running'
+  }
+  return undefined
+}
+
+export function getEventTime(event: KubernetesEvent) {
+  const timestamp =
+    event.lastTimestamp ||
+    event.eventTime ||
+    event.metadata?.creationTimestamp ||
+    event.firstTimestamp
+  return timestamp ? new Date(timestamp) : new Date(0)
 }
 
 // Helper function to check if pod phase is terminal
@@ -222,6 +290,73 @@ export function getPodErrorMessage(pod: Pod): string | undefined {
   }
 
   return undefined
+}
+
+export function getPrinterColumnValue(
+  resource: CustomResource,
+  jsonPath: string
+): string | number | boolean | undefined {
+  let normalizedPath = ''
+  let quote = ''
+  let escaped = false
+
+  for (let i = 0; i < jsonPath.length; i++) {
+    const char = jsonPath[i]
+
+    if (quote) {
+      normalizedPath += char
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === quote) {
+        quote = ''
+      }
+    } else if (char === "'" || char === '"') {
+      quote = char
+      normalizedPath += char
+    } else if (char === '[' && jsonPath[i + 1] === ']') {
+      normalizedPath += '[0]'
+      i++
+    } else {
+      normalizedPath += char
+    }
+  }
+
+  const queryPath = normalizedPath.startsWith('$')
+    ? normalizedPath
+    : normalizedPath.startsWith('.')
+      ? `$${normalizedPath}`
+      : `$.${normalizedPath}`
+
+  let values: unknown[]
+  try {
+    values = jsonpath
+      .query(resource, queryPath)
+      .filter((value) => value !== undefined && value !== null)
+  } catch {
+    return undefined
+  }
+
+  if (values.length === 0) {
+    return undefined
+  }
+
+  const printableValues = values.map((value) => {
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return value
+    }
+
+    return JSON.stringify(value)
+  })
+
+  return printableValues.length === 1
+    ? printableValues[0]
+    : printableValues.join(', ')
 }
 
 export function getDeploymentStatus(
@@ -273,29 +408,14 @@ export function getDeploymentStatus(
 }
 
 export function isStandardK8sResource(kind: string): boolean {
-  const standardK8sResources = [
-    'pods',
-    'deployments',
-    'statefulsets',
-    'daemonsets',
-    'replicasets',
-    'jobs',
-    'cronjobs',
-    'services',
-    'configmaps',
-    'secrets',
-    'persistentvolumeclaims',
-    'persistentvolumes',
-    'ingresses',
-    'namespaces',
-    'nodes',
-    'events',
-    'storageclasses',
-  ]
-  const resourcePath = kind.toLowerCase() + 's'
-  return (
-    standardK8sResources.includes(kind) ||
-    standardK8sResources.includes(resourcePath)
+  const normalizedKind = kind.toLowerCase()
+  return resourceMetadataList.some(
+    (resource) =>
+      resource.type === normalizedKind ||
+      resource.singular === normalizedKind ||
+      resource.singularLabel.toLowerCase() === normalizedKind ||
+      resource.pluralLabel.toLowerCase() === normalizedKind ||
+      resource.shortLabel?.toLowerCase() === normalizedKind
   )
 }
 
@@ -306,42 +426,9 @@ export function getCRDResourcePath(
   name?: string
 ): string {
   const group = apiVersion.includes('/') ? apiVersion.split('/')[0] : ''
-  return `/crds/${kind}.${group}/${namespace}/${name}`
-}
-
-// Get owner reference information for a pod
-export function getOwnerInfo(metadata?: ObjectMeta) {
-  if (!metadata) {
-    return null
-  }
-  const ownerRefs = metadata.ownerReferences
-  if (!ownerRefs || ownerRefs.length === 0) {
-    return null
-  }
-
-  const ownerRef = ownerRefs[0]
-
-  const resourcePath = ownerRef.kind.toLowerCase() + 's'
-  if (isStandardK8sResource(ownerRef.kind)) {
-    const clusterScope = clusterScopeResources.includes(
-      resourcePath as ResourceType
-    )
-    return {
-      kind: ownerRef.kind,
-      name: ownerRef.name,
-      path: `/${resourcePath}${clusterScope ? '' : `/${metadata.namespace}`}/${ownerRef.name}`,
-      controller: ownerRef.controller || false,
-    }
-  } else {
-    const apiVersion = ownerRef.apiVersion || ''
-    const group = apiVersion.includes('/') ? apiVersion.split('/')[0] : ''
-    return {
-      kind: ownerRef.kind,
-      name: ownerRef.name,
-      path: `/crds/${ownerRef.kind.toLowerCase()}s.${group}/${metadata.namespace}/${ownerRef.name}`,
-      controller: ownerRef.controller || false,
-    }
-  }
+  return namespace
+    ? `/crds/${kind}.${group}/${namespace}/${name}`
+    : `/crds/${kind}.${group}/${name}`
 }
 
 // @see https://github.com/kubernetes/kubernetes/blob/bd44685eadc64c8cd46a8259f027f57ba9724a85/pkg/printers/internalversion/printers.go#L1317-L1347
@@ -368,6 +455,16 @@ export function getServiceExternalIP(service: Service): string {
   }
 }
 
+/** Tokens used by the Services list search (name/type/IP + port / nodePort / targetPort). */
+export function getServicePortSearchValues(service: Service): string[] {
+  return (service.spec?.ports ?? []).map((port) => {
+    const protocol = (port.protocol ?? 'TCP').toLowerCase()
+    return port.nodePort != null
+      ? `${port.port}:${port.nodePort}/${protocol}`
+      : `${port.port}/${protocol}`
+  })
+}
+
 // Helper function to check if pod has ready condition
 function hasPodReadyCondition(conditions?: Array<{ type?: string }>): boolean {
   return conditions?.some((condition) => condition.type === 'Ready') ?? false
@@ -392,7 +489,8 @@ function isRestartableInitContainer(container: {
 
 export function toSimpleContainer(
   initContainers?: Container[],
-  containers?: Container[]
+  containers?: Container[],
+  ephemeralContainers?: EphemeralContainer[]
 ): SimpleContainer {
   return [
     ...(containers || []).map((container) => ({
@@ -404,5 +502,26 @@ export function toSimpleContainer(
       image: container.image || '',
       init: true,
     })),
+    ...(ephemeralContainers || []).map((container) => ({
+      name: container.name,
+      image: container.image || '',
+      ephemeral: true,
+    })),
   ]
+}
+
+export function createSearchFilter<T>(
+  ...fieldAccessors: Array<(item: T) => string | string[] | undefined>
+): (item: T, query: string) => boolean {
+  return (item, query) => {
+    const q = query.toLowerCase()
+    return fieldAccessors.some((accessor) => {
+      const value = accessor(item)
+      if (!value) return false
+      if (Array.isArray(value)) {
+        return value.some((v) => v.toLowerCase().includes(q))
+      }
+      return value.toLowerCase().includes(q)
+    })
+  }
 }

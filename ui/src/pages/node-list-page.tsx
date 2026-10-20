@@ -1,14 +1,29 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import {
+  IconBan,
+  IconCircleCheckFilled,
+  IconDroplet,
+} from '@tabler/icons-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { createColumnHelper } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { NodeWithMetrics } from '@/types/api'
+import { cordonNode, drainNode, uncordonNode } from '@/lib/api'
+import { createSearchFilter } from '@/lib/k8s'
 import { formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { MetricCell } from '@/components/metrics-cell'
 import { NodeStatusIcon } from '@/components/node-status-icon'
-import { ResourceTable } from '@/components/resource-table'
+import { ResourceBatchActionDialog } from '@/components/resource-batch-action-dialog'
+import {
+  ResourceTable,
+  type ResourceTableBatchAction,
+} from '@/components/resource-table'
 
 function getNodeStatus(node: NodeWithMetrics): string {
   const conditions = node.status?.conditions || []
@@ -112,19 +127,70 @@ function getNodeIP(node: NodeWithMetrics): string {
   return 'N/A'
 }
 
+const nodeSearchFilter = createSearchFilter<NodeWithMetrics>(
+  (n) => n.metadata?.name,
+  (n) => n.status?.nodeInfo?.kubeletVersion,
+  (n) => getNodeStatus(n),
+  (n) => getNodeRoles(n),
+  (n) => getNodeIP(n)
+)
+
+const columnHelper = createColumnHelper<NodeWithMetrics>()
+
 export function NodeListPage() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [activeBatchAction, setActiveBatchAction] = useState<
+    'cordon' | 'uncordon' | 'drain' | null
+  >(null)
+  const [batchNodes, setBatchNodes] = useState<NodeWithMetrics[]>([])
+  const [drainOptions, setDrainOptions] = useState({
+    force: false,
+    gracePeriod: 30,
+    deleteLocalData: false,
+    ignoreDaemonsets: true,
+  })
 
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<NodeWithMetrics>()
+  const batchActions = useMemo<ResourceTableBatchAction<NodeWithMetrics>[]>(
+    () => [
+      {
+        id: 'cordon',
+        label: t('common.actions.cordon'),
+        icon: <IconBan className="size-4" />,
+        onSelect: (nodes) => {
+          setBatchNodes(nodes)
+          setActiveBatchAction('cordon')
+        },
+      },
+      {
+        id: 'uncordon',
+        label: t('common.actions.uncordon'),
+        icon: <IconCircleCheckFilled className="size-4" />,
+        onSelect: (nodes) => {
+          setBatchNodes(nodes)
+          setActiveBatchAction('uncordon')
+        },
+      },
+      {
+        id: 'drain',
+        label: t('common.actions.drain'),
+        icon: <IconDroplet className="size-4" />,
+        onSelect: (nodes) => {
+          setBatchNodes(nodes)
+          setActiveBatchAction('drain')
+        },
+      },
+    ],
+    [t]
+  )
 
   // Define columns for the node table
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
-        header: t('common.name'),
+        header: t('common.fields.name'),
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link to={`/nodes/${row.original.metadata!.name}`}>
               {row.original.metadata!.name}
             </Link>
@@ -133,7 +199,7 @@ export function NodeListPage() {
       }),
       columnHelper.accessor((row) => getNodeStatus(row), {
         id: 'status',
-        header: t('common.status'),
+        header: t('common.fields.status'),
         cell: ({ getValue }) => {
           const status = getValue()
           return (
@@ -144,11 +210,11 @@ export function NodeListPage() {
           )
         },
       }),
-      columnHelper.accessor((row) => getNodeRoles(row), {
+      columnHelper.accessor((row) => getNodeRoles(row).join(', '), {
         id: 'roles',
         header: 'Roles',
-        cell: ({ getValue }) => {
-          const roles = getValue()
+        cell: ({ row }) => {
+          const roles = getNodeRoles(row.original)
           return (
             <div>
               {roles.map((role) => (
@@ -164,7 +230,7 @@ export function NodeListPage() {
           )
         },
       }),
-      columnHelper.accessor((row) => row.metrics, {
+      columnHelper.accessor((row) => row.metrics?.pods || 0, {
         id: 'pods',
         header: 'Pods',
         cell: ({ row }) => (
@@ -218,7 +284,7 @@ export function NodeListPage() {
         cell: ({ getValue }) => {
           const version = getValue()
           return version ? (
-            <span className="text-sm">{version}</span>
+            <span className="text-sm font-mono">{version}</span>
           ) : (
             <span className="text-muted-foreground">N/A</span>
           )
@@ -247,7 +313,7 @@ export function NodeListPage() {
         },
       }),
       columnHelper.accessor('metadata.creationTimestamp', {
-        header: t('common.created'),
+        header: t('common.fields.created'),
         cell: ({ getValue }) => {
           const dateStr = formatDate(getValue() || '')
           return (
@@ -256,40 +322,135 @@ export function NodeListPage() {
         },
       }),
     ],
-    [columnHelper, t]
+    [t]
   )
 
-  // Custom filter for node search
-  const nodeSearchFilter = useCallback(
-    (node: NodeWithMetrics, query: string) => {
-      const lowerQuery = query.toLowerCase()
-      const roles = getNodeRoles(node)
-      const ip = getNodeIP(node)
-      return (
-        node.metadata!.name!.toLowerCase().includes(lowerQuery) ||
-        (node.status?.nodeInfo?.kubeletVersion?.toLowerCase() || '').includes(
-          lowerQuery
-        ) ||
-        getNodeStatus(node).toLowerCase().includes(lowerQuery) ||
-        roles.some((role) => role.toLowerCase().includes(lowerQuery)) ||
-        ip.toLowerCase().includes(lowerQuery)
-      )
-    },
-    []
-  )
+  const executeBatchAction = async (node: NodeWithMetrics) => {
+    const name = node.metadata!.name!
+    if (activeBatchAction === 'cordon') return cordonNode(name)
+    if (activeBatchAction === 'uncordon') return uncordonNode(name)
+    return drainNode(name, drainOptions)
+  }
+
+  const activeActionLabel = activeBatchAction
+    ? t(`common.actions.${activeBatchAction}`)
+    : ''
 
   return (
-    <ResourceTable
-      resourceName="Nodes"
-      resourceType="nodes"
-      columns={columns}
-      clusterScope={true}
-      searchQueryFilter={nodeSearchFilter}
-      showCreateButton={false}
-      defaultHiddenColumns={[
-        'status_nodeInfo_kernelVersion',
-        'status_nodeInfo_osImage',
-      ]}
-    />
+    <>
+      <ResourceTable
+        resourceName="Nodes"
+        resourceType="nodes"
+        columns={columns}
+        clusterScope={true}
+        searchQueryFilter={nodeSearchFilter}
+        showCreateButton={false}
+        batchActions={batchActions}
+        defaultHiddenColumns={[
+          'status_nodeInfo_kernelVersion',
+          'status_nodeInfo_osImage',
+        ]}
+      />
+
+      {activeBatchAction && (
+        <ResourceBatchActionDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setActiveBatchAction(null)
+          }}
+          resources={batchNodes}
+          title={t(
+            `resourceTable.batchActions.${activeBatchAction}NodesTitle`,
+            { count: batchNodes.length }
+          )}
+          description={t(
+            `resourceTable.batchActions.${activeBatchAction}NodesDescription`,
+            { count: batchNodes.length }
+          )}
+          actionLabel={activeActionLabel}
+          onExecute={executeBatchAction}
+          onComplete={() =>
+            queryClient.invalidateQueries({ queryKey: ['nodes'] })
+          }
+          sequential={activeBatchAction === 'drain'}
+          destructive={activeBatchAction === 'drain'}
+          options={
+            activeBatchAction === 'drain'
+              ? (disabled) => (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="batch-drain-force"
+                        checked={drainOptions.force}
+                        onCheckedChange={(checked) =>
+                          setDrainOptions((current) => ({
+                            ...current,
+                            force: checked === true,
+                          }))
+                        }
+                        disabled={disabled}
+                      />
+                      <Label htmlFor="batch-drain-force">
+                        {t('detail.dialogs.drainNode.forceDrain')}
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="batch-drain-local-data"
+                        checked={drainOptions.deleteLocalData}
+                        onCheckedChange={(checked) =>
+                          setDrainOptions((current) => ({
+                            ...current,
+                            deleteLocalData: checked === true,
+                          }))
+                        }
+                        disabled={disabled}
+                      />
+                      <Label htmlFor="batch-drain-local-data">
+                        {t('detail.dialogs.drainNode.deleteLocalData')}
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="batch-drain-daemonsets"
+                        checked={drainOptions.ignoreDaemonsets}
+                        onCheckedChange={(checked) =>
+                          setDrainOptions((current) => ({
+                            ...current,
+                            ignoreDaemonsets: checked === true,
+                          }))
+                        }
+                        disabled={disabled}
+                      />
+                      <Label htmlFor="batch-drain-daemonsets">
+                        {t('detail.dialogs.drainNode.ignoreDaemonSets')}
+                      </Label>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="batch-drain-grace-period">
+                        {t('detail.dialogs.drainNode.gracePeriod')}
+                      </Label>
+                      <Input
+                        id="batch-drain-grace-period"
+                        type="number"
+                        min={0}
+                        value={drainOptions.gracePeriod}
+                        onChange={(event) =>
+                          setDrainOptions((current) => ({
+                            ...current,
+                            gracePeriod: Number(event.target.value),
+                          }))
+                        }
+                        disabled={disabled}
+                        className="w-28 tabular-nums"
+                      />
+                    </div>
+                  </div>
+                )
+              : undefined
+          }
+        />
+      )}
+    </>
   )
 }

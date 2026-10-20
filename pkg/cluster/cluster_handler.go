@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zxh326/kite/pkg/clusteragent"
 	"github.com/zxh326/kite/pkg/common"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/rbac"
@@ -17,20 +19,41 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// clusterAgentServerURL derives the Kite server URL from the request context,
+// using common.Host / X-Forwarded-Host / request host and common.Base.
+func clusterAgentServerURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(common.Host)
+	if host == "" {
+		host = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+		if host == "" {
+			host = c.Request.Host
+		}
+	}
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		host = scheme + "://" + host
+	}
+	return fmt.Sprintf("%s%s", strings.TrimRight(host, "/"), common.Base)
+}
+
 func (cm *ClusterManager) GetClusters(c *gin.Context) {
-	result := make([]common.ClusterInfo, 0, len(cm.clusters))
+	clusters, errors, defaultContext := cm.snapshotState()
+	result := make([]common.ClusterInfo, 0, len(clusters))
 	user := c.MustGet("user").(model.User)
-	for name, cluster := range cm.clusters {
+	for name, cluster := range clusters {
 		if !rbac.CanAccessCluster(user, name) {
 			continue
 		}
 		result = append(result, common.ClusterInfo{
 			Name:      name,
 			Version:   cluster.Version,
-			IsDefault: name == cm.defaultContext,
+			IsDefault: name == defaultContext,
 		})
 	}
-	for name, errMsg := range cm.errors {
+	for name, errMsg := range errors {
 		if !rbac.CanAccessCluster(user, name) {
 			continue
 		}
@@ -44,7 +67,7 @@ func (cm *ClusterManager) GetClusters(c *gin.Context) {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
-	c.JSON(200, result)
+	c.JSON(http.StatusOK, result)
 }
 
 func (cm *ClusterManager) GetClusterList(c *gin.Context) {
@@ -54,6 +77,7 @@ func (cm *ClusterManager) GetClusterList(c *gin.Context) {
 		return
 	}
 
+	clusterState, errorState, _ := cm.snapshotState()
 	result := make([]gin.H, 0, len(clusters))
 	for _, cluster := range clusters {
 		clusterInfo := gin.H{
@@ -62,15 +86,20 @@ func (cm *ClusterManager) GetClusterList(c *gin.Context) {
 			"description":   cluster.Description,
 			"enabled":       cluster.Enable,
 			"inCluster":     cluster.InCluster,
+			"clusterAgent":  cluster.ClusterAgent,
+			"connected":     cluster.ClusterAgent && cm.clusterAgentManager.Connected(cluster.ID),
 			"isDefault":     cluster.IsDefault,
 			"prometheusURL": cluster.PrometheusURL,
 			"config":        "",
 		}
+		if cluster.ClusterAgent {
+			clusterInfo["clusterAgentVersion"] = cm.clusterAgentManager.Version(cluster.ID)
+		}
 
-		if clientSet, exists := cm.clusters[cluster.Name]; exists {
+		if clientSet, exists := clusterState[cluster.Name]; exists {
 			clusterInfo["version"] = clientSet.Version
 		}
-		if errMsg, exists := cm.errors[cluster.Name]; exists {
+		if errMsg, exists := errorState[cluster.Name]; exists {
 			clusterInfo["error"] = errMsg
 		}
 
@@ -81,18 +110,28 @@ func (cm *ClusterManager) GetClusterList(c *gin.Context) {
 }
 
 func (cm *ClusterManager) CreateCluster(c *gin.Context) {
+	if common.IsSectionManaged("clusters") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	var req struct {
 		Name          string `json:"name" binding:"required"`
 		Description   string `json:"description"`
 		Config        string `json:"config"`
 		PrometheusURL string `json:"prometheusURL"`
 		InCluster     bool   `json:"inCluster"`
+		ClusterAgent  bool   `json:"clusterAgent"`
 		IsDefault     bool   `json:"isDefault"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if req.ClusterAgent {
+		req.InCluster = false
+		req.Config = ""
 	}
 
 	if _, err := model.GetClusterByName(c.Request.Context(), req.Name); err == nil {
@@ -103,40 +142,78 @@ func (cm *ClusterManager) CreateCluster(c *gin.Context) {
 		return
 	}
 
-	// Clearing the default and adding the cluster must not be split by a
-	// client disconnect.
-	writeCtx := context.WithoutCancel(c.Request.Context())
 	if req.IsDefault {
-		if err := model.ClearDefaultCluster(writeCtx); err != nil {
+		if err := model.ClearDefaultCluster(context.WithoutCancel(c.Request.Context())); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	var clusterAgentToken string
+	var clusterAgentTokenHash string
+	var clusterAgentPublicKey string
+	var clusterAgentPrivateKey string
+	var clusterAgentManifestGrant string
+	if req.ClusterAgent {
+		var err error
+		clusterAgentToken, clusterAgentTokenHash, err = clusteragent.NewToken()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		clusterAgentPublicKey, clusterAgentPrivateKey, err = clusteragent.NewRegistrationKeyPair()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		clusterAgentManifestGrant, err = cm.clusterAgentManager.CreateManifestGrant(clusterAgentToken)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 	}
 
 	cluster := &model.Cluster{
-		Name:          req.Name,
-		Description:   req.Description,
-		Config:        model.SecretString(req.Config),
-		PrometheusURL: req.PrometheusURL,
-		InCluster:     req.InCluster,
-		IsDefault:     req.IsDefault,
-		Enable:        true,
+		Name:                   req.Name,
+		Description:            req.Description,
+		Config:                 model.SecretString(req.Config),
+		PrometheusURL:          req.PrometheusURL,
+		InCluster:              req.InCluster,
+		ClusterAgent:           req.ClusterAgent,
+		ClusterAgentTokenHash:  clusterAgentTokenHash,
+		ClusterAgentPublicKey:  clusterAgentPublicKey,
+		ClusterAgentPrivateKey: model.SecretString(clusterAgentPrivateKey),
+		IsDefault:              req.IsDefault,
+		Enable:                 true,
 	}
 
-	if err := model.AddCluster(writeCtx, cluster); err != nil {
+	if err := model.AddCluster(context.WithoutCancel(c.Request.Context()), cluster); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	syncNow <- struct{}{}
+	TriggerClusterSync()
 
-	c.JSON(http.StatusCreated, gin.H{
+	result := gin.H{
 		"id":      cluster.ID,
 		"message": "cluster created successfully",
-	})
+	}
+	if req.ClusterAgent {
+		serverURL := clusterAgentServerURL(c)
+		result["clusterAgentServer"] = serverURL
+		result["clusterAgentToken"] = clusterAgentToken
+		result["clusterAgentPublicKey"] = clusterAgentPublicKey
+		result["clusterAgentManifestURL"] = fmt.Sprintf("%s/api/v1/cluster-agent/manifest?grant=%s", strings.TrimRight(serverURL, "/"), clusterAgentManifestGrant)
+	}
+	c.JSON(http.StatusCreated, result)
 }
 
 func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
+	if common.IsSectionManaged("clusters") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -169,14 +246,15 @@ func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
 		return
 	}
 
-	// Clearing the default and updating the cluster must not be split by a
-	// client disconnect.
-	writeCtx := context.WithoutCancel(c.Request.Context())
 	if req.IsDefault && !cluster.IsDefault {
-		if err := model.ClearDefaultCluster(writeCtx); err != nil {
+		if err := model.ClearDefaultCluster(context.WithoutCancel(c.Request.Context())); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+	}
+	if cluster.ClusterAgent {
+		req.InCluster = false
+		req.Config = ""
 	}
 
 	updates := map[string]interface{}{
@@ -195,17 +273,22 @@ func (cm *ClusterManager) UpdateCluster(c *gin.Context) {
 		updates["config"] = model.SecretString(req.Config)
 	}
 
-	if err := model.UpdateCluster(writeCtx, cluster, updates); err != nil {
+	if err := model.UpdateCluster(context.WithoutCancel(c.Request.Context()), cluster, updates); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	syncNow <- struct{}{}
+	TriggerClusterSync()
 
 	c.JSON(http.StatusOK, gin.H{"message": "cluster updated successfully"})
 }
 
 func (cm *ClusterManager) DeleteCluster(c *gin.Context) {
+	if common.IsSectionManaged("clusters") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -228,17 +311,68 @@ func (cm *ClusterManager) DeleteCluster(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteCluster(c.Request.Context(), cluster); err != nil {
+	if err := model.DeleteCluster(context.WithoutCancel(c.Request.Context()), cluster); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if cluster.ClusterAgent {
+		cm.clusterAgentManager.Disconnect(cluster.ID)
+	}
 
-	syncNow <- struct{}{}
+	TriggerClusterSync()
 
 	c.JSON(http.StatusOK, gin.H{"message": "cluster deleted successfully"})
 }
 
+func (cm *ClusterManager) ConnectClusterAgent(c *gin.Context) {
+	cm.clusterAgentManager.ServeHTTP(c.Writer, c.Request)
+}
+
+func (cm *ClusterManager) RegisterClusterAgent(c *gin.Context) {
+	cm.clusterAgentManager.Register(c.Writer, c.Request)
+}
+
+func (cm *ClusterManager) GetClusterAgentManifest(c *gin.Context) {
+	grant := strings.TrimSpace(c.Query("grant"))
+	token, err := cm.clusterAgentManager.ResolveManifestGrant(grant)
+	if errors.Is(err, clusteragent.ErrInvalidManifestGrant) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired manifest grant"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate manifest grant"})
+		return
+	}
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired manifest grant"})
+		return
+	}
+	publicKey, err := cm.clusterAgentManager.RegistrationPublicKey(token)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load cluster agent registration key"})
+		return
+	}
+	if publicKey == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired manifest grant"})
+		return
+	}
+	serverURL := clusterAgentServerURL(c)
+	image := model.DefaultGeneralClusterAgentImageValue()
+	if setting, err := model.GetGeneralSetting(); err == nil && setting != nil && setting.ClusterAgentImage != "" {
+		image = setting.ClusterAgentImage
+	}
+	manifest := clusteragent.GenerateManifest(serverURL, token, publicKey, image)
+	c.Header("Cache-Control", "no-store")
+	c.Header("Content-Disposition", `attachment; filename="kite-cluster-agent.yaml"`)
+	c.Data(http.StatusOK, "text/yaml; charset=utf-8", []byte(manifest))
+}
+
 func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
+	if common.IsSectionManaged("clusters") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	var clusterReq common.ImportClustersRequest
 	if err := c.ShouldBindJSON(&clusterReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -255,8 +389,8 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if cc > 0 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "import not allowed when clusters exist"})
+	if clusterReq.InCluster && cc > 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "in-cluster import not allowed when clusters exist"})
 		return
 	}
 
@@ -273,10 +407,13 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		syncNow <- struct{}{}
+		TriggerClusterSync()
 		// wait for sync to complete
 		time.Sleep(1 * time.Second)
-		c.JSON(http.StatusCreated, gin.H{"message": fmt.Sprintf("imported %d clusters successfully", 1)})
+		c.JSON(http.StatusCreated, gin.H{
+			"message":       fmt.Sprintf("imported %d clusters successfully", 1),
+			"importedCount": 1,
+		})
 		return
 	}
 
@@ -286,10 +423,12 @@ func (cm *ClusterManager) ImportClustersFromKubeconfig(c *gin.Context) {
 		return
 	}
 
-	// A partial import would block a retry ("import not allowed when clusters exist").
-	importedCount := ImportClustersFromKubeconfig(context.WithoutCancel(c.Request.Context()), kubeconfig)
-	syncNow <- struct{}{}
+	importedCount := ImportClustersFromKubeconfig(context.WithoutCancel(c.Request.Context()), kubeconfig, cc == 0)
+	TriggerClusterSync()
 	// wait for sync to complete
 	time.Sleep(1 * time.Second)
-	c.JSON(http.StatusCreated, gin.H{"message": fmt.Sprintf("imported %d clusters successfully", importedCount)})
+	c.JSON(http.StatusCreated, gin.H{
+		"message":       fmt.Sprintf("imported %d clusters successfully", importedCount),
+		"importedCount": importedCount,
+	})
 }

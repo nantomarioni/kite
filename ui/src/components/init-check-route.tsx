@@ -5,9 +5,13 @@ import { useInitCheck } from '@/lib/api'
 
 interface InitCheckRouteProps {
   children: ReactNode
+  allowIncompleteSetup?: boolean
 }
 
-export function InitCheckRoute({ children }: InitCheckRouteProps) {
+export function InitCheckRoute({
+  children,
+  allowIncompleteSetup = false,
+}: InitCheckRouteProps) {
   const { data: initCheck, isLoading } = useInitCheck()
 
   if (isLoading) {
@@ -18,8 +22,10 @@ export function InitCheckRoute({ children }: InitCheckRouteProps) {
     )
   }
 
-  // Check if app is initialized first
-  if (!initCheck?.initialized) {
+  if (
+    initCheck?.initialized === false &&
+    (!allowIncompleteSetup || (initCheck.step ?? 0) === 0)
+  ) {
     return <Navigate to="/setup" replace />
   }
 

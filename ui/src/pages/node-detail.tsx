@@ -1,15 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   IconBan,
   IconCircleCheckFilled,
   IconDroplet,
   IconExclamationCircle,
-  IconLoader,
   IconLock,
-  IconRefresh,
   IconReload,
 } from '@tabler/icons-react'
-import * as yaml from 'js-yaml'
 import { Node } from 'kubernetes-types/core/v1'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -21,10 +18,14 @@ import {
   uncordonNode,
   untaintNode,
   updateResource,
+  useRelatedResources,
   useResource,
   useResources,
+  useResourcesEvents,
 } from '@/lib/api'
+import { getEventTime } from '@/lib/k8s'
 import {
+  cn,
   enrichNodeConditionsWithHealth,
   formatCPU,
   formatDate,
@@ -41,7 +42,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { ResponsiveTabs } from '@/components/ui/responsive-tabs'
 import {
   Select,
   SelectContent,
@@ -49,28 +49,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { DescribeDialog } from '@/components/describe-dialog'
-import { ErrorMessage } from '@/components/error-message'
 import { EventTable } from '@/components/event-table'
-import { LabelsAnno } from '@/components/lables-anno'
 import { NodeMonitoring } from '@/components/node-monitoring'
+import {
+  CompactEventsCard,
+  CompactRelatedResourcesCard,
+  MetadataListCard,
+} from '@/components/pod-overview-sidebar'
 import { PodTable } from '@/components/pod-table'
+import { ResourceYaml } from '@/components/resource-yaml'
 import { Terminal } from '@/components/terminal'
-import { YamlEditor } from '@/components/yaml-editor'
+import {
+  WorkloadInfoBlock,
+  WorkloadInfoRow,
+  WorkloadSummaryCard,
+} from '@/components/workload-overview-parts'
+
+import { ResourceDetailShell } from './resource-detail-shell'
 
 export function NodeDetail(props: { name: string }) {
   const { name } = props
-  const [yamlContent, setYamlContent] = useState('')
-  const [isSavingYaml, setIsSavingYaml] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
   const { t } = useTranslation()
 
-  // Node operation states
   const [isDrainPopoverOpen, setIsDrainPopoverOpen] = useState(false)
   const [isCordonPopoverOpen, setIsCordonPopoverOpen] = useState(false)
   const [isTaintPopoverOpen, setIsTaintPopoverOpen] = useState(false)
 
-  // Drain operation options
   const [drainOptions, setDrainOptions] = useState({
     force: false,
     gracePeriod: 30,
@@ -78,29 +82,18 @@ export function NodeDetail(props: { name: string }) {
     ignoreDaemonsets: true,
   })
 
-  // Taint operation data
   const [taintData, setTaintData] = useState({
     key: '',
     value: '',
     effect: 'NoSchedule' as 'NoSchedule' | 'PreferNoSchedule' | 'NoExecute',
   })
 
-  // Untaint key
   const [untaintKey, setUntaintKey] = useState('')
 
-  const {
-    data,
-    isLoading,
-    isError,
-    error,
-    refetch: handleRefresh,
-  } = useResource('nodes', name)
-
-  useEffect(() => {
-    if (data) {
-      setYamlContent(yaml.dump(data, { indent: 2 }))
-    }
-  }, [data])
+  const { data, isLoading, isError, error, refetch } = useResource(
+    'nodes',
+    name
+  )
 
   const {
     data: relatedPods,
@@ -111,141 +104,161 @@ export function NodeDetail(props: { name: string }) {
   })
 
   const handleSaveYaml = async (content: Node) => {
-    setIsSavingYaml(true)
-    try {
-      await updateResource('nodes', name, undefined, content)
-      toast.success('YAML saved successfully')
-    } catch (error) {
-      console.error('Failed to save YAML:', error)
-      toast.error(translateError(error, t))
-    } finally {
-      setIsSavingYaml(false)
-    }
+    await updateResource('nodes', name, undefined, content)
+    toast.success(t('common.messages.yamlSaved'))
   }
 
-  // Node operation handlers
+  const handleRefresh = async () => {
+    await refetch()
+    await refetchRelated()
+  }
+
   const handleDrain = async () => {
     try {
-      await drainNode(name, drainOptions)
-      toast.success(`Node ${name} drained successfully`)
+      const result = await drainNode(name, drainOptions)
+      toast.success(
+        t('detail.status.nodeDrained', {
+          name,
+          pods: result.pods,
+        })
+      )
+      if (result.warnings) toast.warning(result.warnings)
       setIsDrainPopoverOpen(false)
-      handleRefresh()
-    } catch (error) {
-      console.error('Failed to drain node:', error)
-      toast.error(translateError(error, t))
+      await refetch()
+      await refetchRelated()
+    } catch (err) {
+      toast.error(translateError(err, t))
     }
   }
 
   const handleCordon = async () => {
     try {
       await cordonNode(name)
-      toast.success(`Node ${name} cordoned successfully`)
+      toast.success(t('detail.status.nodeCordoned', { name }))
       setIsCordonPopoverOpen(false)
-      handleRefresh()
-    } catch (error) {
-      console.error('Failed to cordon node:', error)
-      toast.error(translateError(error, t))
+      refetch()
+    } catch (err) {
+      toast.error(translateError(err, t))
     }
   }
 
   const handleUncordon = async () => {
     try {
       await uncordonNode(name)
-      toast.success(`Node ${name} uncordoned successfully`)
+      toast.success(t('detail.status.nodeUncordoned', { name }))
       setIsCordonPopoverOpen(false)
-      handleRefresh()
-    } catch (error) {
-      console.error('Failed to uncordon node:', error)
-      toast.error(translateError(error, t))
+      refetch()
+    } catch (err) {
+      toast.error(translateError(err, t))
     }
   }
 
   const handleTaint = async () => {
     if (!taintData.key.trim()) {
-      toast.error('Taint key is required')
+      toast.error(t('detail.status.taintKeyRequired'))
       return
     }
-
     try {
       await taintNode(name, taintData)
-      toast.success(`Node ${name} tainted successfully`)
+      toast.success(t('detail.status.nodeTainted', { name }))
       setIsTaintPopoverOpen(false)
       setTaintData({ key: '', value: '', effect: 'NoSchedule' })
-      handleRefresh()
-    } catch (error) {
-      console.error('Failed to taint node:', error)
-      toast.error(translateError(error, t))
+      refetch()
+    } catch (err) {
+      toast.error(translateError(err, t))
     }
   }
 
   const handleUntaint = async (key?: string) => {
     const taintKey = key || untaintKey
     if (!taintKey.trim()) {
-      toast.error('Taint key is required')
+      toast.error(t('detail.status.taintKeyRequired'))
       return
     }
-
     try {
       await untaintNode(name, taintKey)
-      toast.success(`Taint removed from node ${name} successfully`)
+      toast.success(t('detail.status.nodeTaintRemoved', { name }))
       if (!key) setUntaintKey('')
-      handleRefresh()
-    } catch (error) {
-      console.error('Failed to remove taint:', error)
-      toast.error(translateError(error, t))
+      refetch()
+    } catch (err) {
+      toast.error(translateError(err, t))
     }
-  }
-
-  const handleYamlChange = (content: string) => {
-    setYamlContent(content)
-  }
-
-  const handleManualRefresh = async () => {
-    setRefreshKey((prev) => prev + 1)
-    await handleRefresh()
-    await refetchRelated()
-  }
-
-  if (isLoading) {
-    return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-center gap-2">
-              <IconLoader className="animate-spin" />
-              <span>Loading node details...</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if (isError || !data) {
-    return (
-      <ErrorMessage resourceName="Node" error={error} refetch={handleRefresh} />
-    )
   }
 
   return (
-    <div className="space-y-2">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold">{name}</h1>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            disabled={isLoading}
-            variant="outline"
-            size="sm"
-            onClick={handleManualRefresh}
-          >
-            <IconRefresh className="w-4 h-4" />
-            Refresh
-          </Button>
-          <DescribeDialog resourceType="nodes" name={name} />
-          {/* Drain Node Popover */}
+    <ResourceDetailShell
+      resourceType="nodes"
+      resourceLabel={t('common.fields.node')}
+      name={name}
+      data={data}
+      isLoading={isLoading}
+      error={isError ? error : null}
+      onRefresh={handleRefresh}
+      showDelete={false}
+      tabs={[
+        {
+          value: 'overview',
+          label: t('common.tabs.overview'),
+          content: data ? (
+            <NodeOverview
+              node={data}
+              podCount={relatedPods?.length || 0}
+              onUntaint={handleUntaint}
+            />
+          ) : null,
+        },
+        {
+          value: 'yaml',
+          label: t('common.tabs.yaml'),
+          content: ({ resource, refreshKey }) => (
+            <ResourceYaml
+              key={refreshKey}
+              value={resource}
+              onSave={handleSaveYaml}
+              fillHeight
+            />
+          ),
+        },
+        ...(relatedPods && relatedPods.length > 0
+          ? [
+              {
+                value: 'pods',
+                label: (
+                  <>
+                    {t('common.tabs.pods')}{' '}
+                    <Badge variant="secondary">{relatedPods.length}</Badge>
+                  </>
+                ),
+                content: (
+                  <PodTable
+                    pods={relatedPods}
+                    isLoading={isLoadingRelated}
+                    hiddenNode
+                  />
+                ),
+              },
+            ]
+          : []),
+        {
+          value: 'monitor',
+          label: t('common.tabs.monitor'),
+          content: <NodeMonitoring name={name} />,
+        },
+        {
+          value: 'terminal',
+          label: t('common.tabs.terminal'),
+          content: <Terminal type="node" nodeName={name} />,
+        },
+        {
+          value: 'events',
+          label: t('common.tabs.events'),
+          content: (
+            <EventTable resource="nodes" namespace={undefined} name={name} />
+          ),
+        },
+      ]}
+      headerActions={
+        <>
           <Popover
             open={isDrainPopoverOpen}
             onOpenChange={setIsDrainPopoverOpen}
@@ -253,15 +266,17 @@ export function NodeDetail(props: { name: string }) {
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm">
                 <IconDroplet className="w-4 h-4" />
-                Drain
+                {t('common.actions.drain')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80">
               <div className="space-y-4">
                 <div>
-                  <h4 className="font-medium">Drain Node</h4>
+                  <h4 className="font-medium">
+                    {t('detail.dialogs.drainNode.title')}
+                  </h4>
                   <p className="text-sm text-muted-foreground">
-                    Safely evict all pods from this node.
+                    {t('detail.dialogs.drainNode.description')}
                   </p>
                 </div>
                 <div className="space-y-3">
@@ -278,7 +293,7 @@ export function NodeDetail(props: { name: string }) {
                       }
                     />
                     <Label htmlFor="force" className="text-sm">
-                      Force drain
+                      {t('detail.dialogs.drainNode.forceDrain')}
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -294,7 +309,7 @@ export function NodeDetail(props: { name: string }) {
                       }
                     />
                     <Label htmlFor="deleteLocalData" className="text-sm">
-                      Delete local data
+                      {t('detail.dialogs.drainNode.deleteLocalData')}
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -310,12 +325,12 @@ export function NodeDetail(props: { name: string }) {
                       }
                     />
                     <Label htmlFor="ignoreDaemonsets" className="text-sm">
-                      Ignore DaemonSets
+                      {t('detail.dialogs.drainNode.ignoreDaemonSets')}
                     </Label>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="gracePeriod" className="text-sm">
-                      Grace Period (seconds)
+                      {t('detail.dialogs.drainNode.gracePeriod')}
                     </Label>
                     <Input
                       id="gracePeriod"
@@ -333,25 +348,24 @@ export function NodeDetail(props: { name: string }) {
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleDrain} size="sm" variant="destructive">
-                    Drain Node
+                    {t('detail.dialogs.drainNode.drainButton')}
                   </Button>
                   <Button
                     onClick={() => setIsDrainPopoverOpen(false)}
                     size="sm"
                     variant="outline"
                   >
-                    Cancel
+                    {t('common.actions.cancel')}
                   </Button>
                 </div>
               </div>
             </PopoverContent>
           </Popover>
 
-          {/* Cordon/Uncordon Toggle */}
-          {data.spec?.unschedulable ? (
+          {data?.spec?.unschedulable ? (
             <Button onClick={handleUncordon} variant="outline" size="sm">
               <IconReload className="w-4 h-4" />
-              Uncordon
+              {t('common.actions.uncordon')}
             </Button>
           ) : (
             <Popover
@@ -361,15 +375,17 @@ export function NodeDetail(props: { name: string }) {
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm">
                   <IconBan className="w-4 h-4" />
-                  Cordon
+                  {t('common.actions.cordon')}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64">
                 <div className="space-y-4">
                   <div>
-                    <h4 className="font-medium">Cordon Node</h4>
+                    <h4 className="font-medium">
+                      {t('detail.dialogs.cordonNode.title')}
+                    </h4>
                     <p className="text-sm text-muted-foreground">
-                      Mark this node as unschedulable.
+                      {t('detail.dialogs.cordonNode.description')}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -378,14 +394,14 @@ export function NodeDetail(props: { name: string }) {
                       size="sm"
                       variant="destructive"
                     >
-                      Cordon Node
+                      {t('detail.dialogs.cordonNode.cordonButton')}
                     </Button>
                     <Button
                       onClick={() => setIsCordonPopoverOpen(false)}
                       size="sm"
                       variant="outline"
                     >
-                      Cancel
+                      {t('common.actions.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -393,7 +409,6 @@ export function NodeDetail(props: { name: string }) {
             </Popover>
           )}
 
-          {/* Taint Node Popover */}
           <Popover
             open={isTaintPopoverOpen}
             onOpenChange={setIsTaintPopoverOpen}
@@ -401,21 +416,23 @@ export function NodeDetail(props: { name: string }) {
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm">
                 <IconLock className="w-4 h-4" />
-                Taint
+                {t('common.actions.taint')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80">
               <div className="space-y-4">
                 <div>
-                  <h4 className="font-medium">Taint Node</h4>
+                  <h4 className="font-medium">
+                    {t('detail.dialogs.taintNode.title')}
+                  </h4>
                   <p className="text-sm text-muted-foreground">
-                    Add a taint to prevent pods from being scheduled.
+                    {t('detail.dialogs.taintNode.description')}
                   </p>
                 </div>
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <Label htmlFor="taintKey" className="text-sm">
-                      Key *
+                      {t('detail.dialogs.taintNode.key')}
                     </Label>
                     <Input
                       id="taintKey"
@@ -423,12 +440,12 @@ export function NodeDetail(props: { name: string }) {
                       onChange={(e) =>
                         setTaintData({ ...taintData, key: e.target.value })
                       }
-                      placeholder="e.g., node.kubernetes.io/maintenance"
+                      placeholder={t('detail.dialogs.taintNode.keyPlaceholder')}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="taintValue" className="text-sm">
-                      Value
+                      {t('detail.dialogs.taintNode.value')}
                     </Label>
                     <Input
                       id="taintValue"
@@ -436,12 +453,14 @@ export function NodeDetail(props: { name: string }) {
                       onChange={(e) =>
                         setTaintData({ ...taintData, value: e.target.value })
                       }
-                      placeholder="Optional value"
+                      placeholder={t(
+                        'detail.dialogs.taintNode.valuePlaceholder'
+                      )}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="taintEffect" className="text-sm">
-                      Effect
+                      {t('detail.dialogs.taintNode.effect')}
                     </Label>
                     <Select
                       value={taintData.effect}
@@ -464,465 +483,331 @@ export function NodeDetail(props: { name: string }) {
                 </div>
                 <div className="flex gap-2">
                   <Button onClick={handleTaint} size="sm" variant="destructive">
-                    Add Taint
+                    {t('detail.dialogs.taintNode.addTaintButton')}
                   </Button>
                   <Button
                     onClick={() => setIsTaintPopoverOpen(false)}
                     size="sm"
                     variant="outline"
                   >
-                    Cancel
+                    {t('common.actions.cancel')}
                   </Button>
                 </div>
               </div>
             </PopoverContent>
           </Popover>
-        </div>
+        </>
+      }
+    />
+  )
+}
+
+function NodeOverview({
+  node,
+  podCount,
+  onUntaint,
+}: {
+  node: Node
+  podCount: number
+  onUntaint: (key?: string) => void
+}) {
+  const { t } = useTranslation()
+  const name = node.metadata?.name || ''
+  const labels = node.metadata?.labels || {}
+  const annotations = node.metadata?.annotations || {}
+  const { data: events, isLoading: isEventsLoading } = useResourcesEvents(
+    'nodes',
+    name
+  )
+  const { data: relatedResources, isLoading: isRelatedLoading } =
+    useRelatedResources('nodes', name)
+  const sortedEvents = useMemo(() => {
+    return (events || []).slice().sort((a, b) => {
+      const timeDiff = getEventTime(b).getTime() - getEventTime(a).getTime()
+      if (timeDiff !== 0) {
+        return timeDiff
+      }
+      return (
+        Number(b.metadata?.resourceVersion || 0) -
+        Number(a.metadata?.resourceVersion || 0)
+      )
+    })
+  }, [events])
+  const isReady = node.status?.conditions?.some(
+    (condition) => condition.type === 'Ready' && condition.status === 'True'
+  )
+  const role =
+    Object.keys(labels)
+      .find((key) => key.startsWith('node-role.kubernetes.io/'))
+      ?.replace('node-role.kubernetes.io/', '') || '-'
+  const internalIP =
+    node.status?.addresses?.find((addr) => addr.type === 'InternalIP')
+      ?.address || '-'
+  const hostname =
+    node.status?.addresses?.find((addr) => addr.type === 'Hostname')?.address ||
+    '-'
+  const externalIP =
+    node.status?.addresses?.find((addr) => addr.type === 'ExternalIP')
+      ?.address || '-'
+  const podAllocatable = node.status?.allocatable?.pods || '-'
+  const podCapacity = node.status?.capacity?.pods || '-'
+  const conditions = enrichNodeConditionsWithHealth(
+    node.status?.conditions || []
+  )
+
+  return (
+    <div className="@container/node-overview space-y-3">
+      <div className="grid gap-3 md:grid-cols-2 @4xl/node-overview:grid-cols-6">
+        <WorkloadSummaryCard
+          label={t('common.fields.status')}
+          value={
+            <span className="inline-flex min-w-0 items-center gap-2">
+              {isReady ? (
+                <IconCircleCheckFilled className="size-4 shrink-0 fill-green-500" />
+              ) : (
+                <IconExclamationCircle className="size-4 shrink-0 fill-red-500" />
+              )}
+              <span className="truncate">
+                {isReady
+                  ? t('common.fields.ready')
+                  : t('common.messages.notReady')}
+              </span>
+            </span>
+          }
+          detail={
+            node.spec?.unschedulable
+              ? t('detail.fields.schedulingDisabled')
+              : undefined
+          }
+        />
+        <WorkloadSummaryCard label={t('common.fields.role')} value={role} />
+        <WorkloadSummaryCard
+          label={t('common.fields.internalIP')}
+          value={internalIP}
+          mono
+        />
+        <WorkloadSummaryCard
+          label={t('common.fields.pods')}
+          value={`${podCount} / ${podAllocatable}`}
+          detail={`${t('common.messages.assigned')} / ${t('common.fields.allocatable')}`}
+        />
+        <WorkloadSummaryCard
+          label={t('common.fields.cpu')}
+          value={
+            node.status?.allocatable?.cpu
+              ? formatCPU(node.status.allocatable.cpu)
+              : '-'
+          }
+          detail={
+            node.status?.capacity?.cpu
+              ? `${t('common.fields.capacity')} ${formatCPU(node.status.capacity.cpu)}`
+              : undefined
+          }
+        />
+        <WorkloadSummaryCard
+          label={t('common.fields.memory')}
+          value={
+            node.status?.allocatable?.memory
+              ? formatMemory(node.status.allocatable.memory)
+              : '-'
+          }
+          detail={
+            node.status?.capacity?.memory
+              ? `${t('common.fields.capacity')} ${formatMemory(node.status.capacity.memory)}`
+              : undefined
+          }
+        />
       </div>
 
-      <ResponsiveTabs
-        tabs={[
-          {
-            value: 'overview',
-            label: 'Overview',
-            content: (
-              <div className="space-y-6">
-                {/* Status Overview */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Status Overview</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          {data.status?.conditions?.find(
-                            (c) => c.type === 'Ready' && c.status === 'True'
-                          ) ? (
-                            <IconCircleCheckFilled className="w-4 h-4 fill-green-500" />
-                          ) : (
-                            <IconExclamationCircle className="w-4 h-4 fill-red-500" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-xs text-muted-foreground">
-                            Status
-                          </p>
-                          <p className="text-sm font-medium">
-                            {data.status?.conditions?.find(
-                              (c) => c.type === 'Ready' && c.status === 'True'
-                            )
-                              ? 'Ready'
-                              : 'Not Ready'}
-                            {data.spec?.unschedulable
-                              ? ' (SchedulingDisabled)'
-                              : ''}
-                          </p>
-                        </div>
-                      </div>
+      <div className="grid gap-3 @4xl/node-overview:grid-cols-3">
+        <div className="space-y-3 @4xl/node-overview:col-span-2">
+          <Card className="gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none">
+            <CardHeader className="px-3 py-2.5 !pb-2.5">
+              <CardTitle className="text-balance text-sm">
+                {t('common.fields.information')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 pb-3 pt-1">
+              <div className="space-y-3">
+                <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+                  <WorkloadInfoBlock label={t('common.fields.created')}>
+                    {node.metadata?.creationTimestamp
+                      ? formatDate(node.metadata.creationTimestamp)
+                      : '-'}
+                  </WorkloadInfoBlock>
+                  <WorkloadInfoBlock label={t('common.fields.hostname')} mono>
+                    {hostname}
+                  </WorkloadInfoBlock>
+                </div>
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">Role</p>
-                        <p className="text-sm">
-                          {Object.keys(data.metadata?.labels || {})
-                            .find((key) =>
-                              key.startsWith('node-role.kubernetes.io/')
-                            )
-                            ?.replace('node-role.kubernetes.io/', '') || 'N/A'}
-                        </p>
-                      </div>
+                <div className="grid gap-x-8 gap-y-2 border-t border-border/60 pt-3 md:grid-cols-2">
+                  <WorkloadInfoRow label={t('common.fields.externalIP')} mono>
+                    {externalIP}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.podCIDR')} mono>
+                    {node.spec?.podCIDR || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow
+                    label={t('common.fields.kubeletVersion')}
+                    mono
+                  >
+                    {node.status?.nodeInfo?.kubeletVersion || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.kubeProxyVersion')}>
+                    {node.status?.nodeInfo?.kubeProxyVersion || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow
+                    label={t('common.fields.osImage')}
+                    truncate={false}
+                  >
+                    {node.status?.nodeInfo?.osImage || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.kernelVersion')}>
+                    {node.status?.nodeInfo?.kernelVersion || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.architecture')}>
+                    {node.status?.nodeInfo?.architecture || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.containerRuntime')}>
+                    {node.status?.nodeInfo?.containerRuntimeVersion || '-'}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('detail.fields.podCapacity')}>
+                    {podAllocatable} / {podCapacity}
+                  </WorkloadInfoRow>
+                  <WorkloadInfoRow label={t('common.fields.storage')}>
+                    {node.status?.allocatable?.['ephemeral-storage']
+                      ? formatMemory(
+                          node.status.allocatable['ephemeral-storage']
+                        )
+                      : '-'}{' '}
+                    /{' '}
+                    {node.status?.capacity?.['ephemeral-storage']
+                      ? formatMemory(node.status.capacity['ephemeral-storage'])
+                      : '-'}
+                  </WorkloadInfoRow>
+                </div>
 
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          Internal IP
-                        </p>
-                        <p className="text-sm font-medium font-mono">
-                          {data.status?.addresses?.find(
-                            (addr) => addr.type === 'InternalIP'
-                          )?.address || 'N/A'}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          Pod CIDR
-                        </p>
-                        <p className="text-sm font-medium font-mono">
-                          {data.spec?.podCIDR || 'N/A'}
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Node Information */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Node Information</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Created
-                        </Label>
-                        <p className="text-sm">
-                          {formatDate(
-                            data.metadata?.creationTimestamp || '',
-                            true
-                          )}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Kubelet Version
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.kubeletVersion || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Hostname
-                        </Label>
-                        <p className="text-sm font-mono">
-                          {data.status?.addresses?.find(
-                            (addr) => addr.type === 'Hostname'
-                          )?.address || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          External IP
-                        </Label>
-                        <p className="text-sm font-mono">
-                          {data.status?.addresses?.find(
-                            (addr) => addr.type === 'ExternalIP'
-                          )?.address || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          OS Image
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.osImage || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Kernel Version
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.kernelVersion || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Architecture
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.architecture || 'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Container Runtime
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.containerRuntimeVersion ||
-                            'N/A'}
-                        </p>
-                      </div>
-                      <div>
-                        <Label className="text-xs text-muted-foreground">
-                          Kube Proxy Version
-                        </Label>
-                        <p className="text-sm">
-                          {data.status?.nodeInfo?.kubeProxyVersion || 'N/A'}
-                        </p>
-                      </div>
-                    </div>
-                    <LabelsAnno
-                      labels={data.metadata?.labels || {}}
-                      annotations={data.metadata?.annotations || {}}
-                    />
-                  </CardContent>
-                </Card>
-
-                {/* Resource Capacity & Allocation */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Resource Capacity</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className="text-sm font-medium mb-3">
-                          CPU & Memory
-                        </h4>
-                        <div className="space-y-3">
-                          <div className="flex justify-between items-center p-3 border rounded-lg">
-                            <div>
-                              <p className="text-sm font-medium">CPU</p>
-                              <p className="text-xs text-muted-foreground">
-                                Capacity:{' '}
-                                {data.status?.capacity?.cpu
-                                  ? formatCPU(data.status.capacity.cpu)
-                                  : 'N/A'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-medium">
-                                {data.status?.allocatable?.cpu
-                                  ? formatCPU(data.status.allocatable.cpu)
-                                  : 'N/A'}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Allocatable
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex justify-between items-center p-3 border rounded-lg">
-                            <div>
-                              <p className="text-sm font-medium">Memory</p>
-                              <p className="text-xs text-muted-foreground">
-                                Capacity:{' '}
-                                {data.status?.capacity?.memory
-                                  ? formatMemory(data.status.capacity.memory)
-                                  : 'N/A'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-medium">
-                                {data.status?.allocatable?.memory
-                                  ? formatMemory(data.status.allocatable.memory)
-                                  : 'N/A'}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Allocatable
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-medium mb-3">
-                          Pods & Storage
-                        </h4>
-                        <div className="space-y-3">
-                          <div className="flex justify-between items-center p-3 border rounded-lg">
-                            <div>
-                              <p className="text-sm font-medium">Pods</p>
-                              <p className="text-xs text-muted-foreground">
-                                Capacity: {data.status?.capacity?.pods || 'N/A'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-medium">
-                                {data.status?.allocatable?.pods || 'N/A'}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Allocatable
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex justify-between items-center p-3 border rounded-lg">
-                            <div>
-                              <p className="text-sm font-medium">Storage</p>
-                              <p className="text-xs text-muted-foreground">
-                                Capacity:{' '}
-                                {data.status?.capacity?.['ephemeral-storage']
-                                  ? formatMemory(
-                                      data.status.capacity['ephemeral-storage']
-                                    )
-                                  : 'N/A'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-medium">
-                                {data.status?.allocatable?.['ephemeral-storage']
-                                  ? formatMemory(
-                                      data.status.allocatable[
-                                        'ephemeral-storage'
-                                      ]
-                                    )
-                                  : 'N/A'}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Allocatable
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Node Taints */}
-                {data.spec?.taints && data.spec.taints.length > 0 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Node Taints</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-1 gap-2">
-                        {data.spec.taints.map((taint, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center gap-3 p-3 border rounded-lg"
-                          >
-                            <Badge variant="secondary">{taint.effect}</Badge>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium">{taint.key}</p>
-                              {taint.value && (
-                                <p className="text-xs text-muted-foreground">
-                                  = {taint.value}
-                                </p>
-                              )}
-                            </div>
-                            {taint.timeAdded && (
-                              <p className="text-xs text-muted-foreground">
-                                {formatDate(taint.timeAdded)}
-                              </p>
-                            )}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleUntaint(taint.key)}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Node Conditions */}
-                {data.status?.conditions &&
-                  data.status.conditions.length > 0 && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Node Conditions</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {enrichNodeConditionsWithHealth(
-                            data.status.conditions
-                          ).map((condition, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center gap-3 p-3 border rounded-lg"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className={`w-2 h-2 rounded-full ${
-                                    condition.health === 'True'
-                                      ? 'bg-green-500'
-                                      : condition.health === 'False'
-                                        ? 'bg-red-500'
-                                        : 'bg-yellow-500'
-                                  }`}
-                                />
-                                <Badge
-                                  variant={
-                                    condition.health === 'True'
-                                      ? 'default'
-                                      : 'secondary'
-                                  }
-                                  className="text-xs"
-                                >
-                                  {condition.type}
-                                </Badge>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {condition.message ||
-                                    condition.reason ||
-                                    'No message'}
-                                </p>
-                              </div>
-                              <Badge variant="outline" className="text-xs">
-                                {condition.status}
-                              </Badge>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
+                <div className="border-t border-border/60 pt-2">
+                  <WorkloadInfoRow
+                    label={t('common.fields.uid')}
+                    mono
+                    truncate={false}
+                    compact
+                  >
+                    <span className="break-all">
+                      {node.metadata?.uid || '-'}
+                    </span>
+                  </WorkloadInfoRow>
+                </div>
               </div>
-            ),
-          },
-          {
-            value: 'yaml',
-            label: 'YAML',
-            content: (
-              <div className="space-y-4">
-                <YamlEditor<'nodes'>
-                  key={refreshKey}
-                  value={yamlContent}
-                  title="YAML Configuration"
-                  onSave={handleSaveYaml}
-                  onChange={handleYamlChange}
-                  isSaving={isSavingYaml}
-                />
-              </div>
-            ),
-          },
-          ...(relatedPods && relatedPods.length > 0
-            ? [
-                {
-                  value: 'pods',
-                  label: (
-                    <>
-                      Pods{' '}
-                      {relatedPods && (
-                        <Badge variant="secondary">{relatedPods.length}</Badge>
-                      )}
-                    </>
-                  ),
-                  content: (
-                    <PodTable
-                      pods={relatedPods}
-                      isLoading={isLoadingRelated}
-                      hiddenNode
-                    />
-                  ),
-                },
-              ]
-            : []),
-          {
-            value: 'monitor',
-            label: 'Monitor',
-            content: <NodeMonitoring name={name} />,
-          },
-          {
-            value: 'Terminal',
-            label: 'Terminal',
-            content: (
-              <div className="space-y-6">
-                <Terminal type="node" nodeName={name} />
-              </div>
-            ),
-          },
-          {
-            value: 'events',
-            label: 'Events',
-            content: (
-              <EventTable
-                resource={'nodes'}
-                namespace={undefined}
-                name={name}
-              />
-            ),
-          },
-        ]}
-      />
+            </CardContent>
+          </Card>
+
+          {node.spec?.taints && node.spec.taints.length > 0 ? (
+            <Card className="gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none">
+              <CardHeader className="px-3 py-2.5 !pb-2.5">
+                <CardTitle className="text-balance text-sm">
+                  {t('detail.sections.nodeTaints')} ({node.spec.taints.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="divide-y divide-border/70 p-0">
+                {node.spec.taints.map((taint, index) => (
+                  <div
+                    key={`${taint.key}-${taint.effect}-${index}`}
+                    className="flex min-w-0 items-center gap-3 px-3 py-2 text-sm"
+                  >
+                    <Badge variant="secondary" className="shrink-0">
+                      {taint.effect}
+                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono">{taint.key}</div>
+                      {taint.value ? (
+                        <div className="truncate text-xs text-muted-foreground">
+                          = {taint.value}
+                        </div>
+                      ) : null}
+                    </div>
+                    {taint.timeAdded ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {formatDate(taint.timeAdded)}
+                      </span>
+                    ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onUntaint(taint.key)}
+                    >
+                      {t('common.actions.remove')}
+                    </Button>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {conditions.length > 0 ? (
+            <Card className="gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none">
+              <CardHeader className="px-3 py-2.5 !pb-2.5">
+                <CardTitle className="text-balance text-sm">
+                  {t('detail.sections.nodeConditions')} ({conditions.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="divide-y divide-border/70 p-0">
+                {conditions.map((condition) => (
+                  <div
+                    key={condition.type}
+                    className="grid min-w-0 grid-cols-[10rem_minmax(0,1fr)_4rem] items-center gap-2 px-3 py-2 text-xs"
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <span
+                        className={cn(
+                          'size-1.5 shrink-0 rounded-full',
+                          condition.health === 'True' && 'bg-emerald-500',
+                          condition.health === 'False' && 'bg-destructive',
+                          condition.health !== 'True' &&
+                            condition.health !== 'False' &&
+                            'bg-yellow-500'
+                        )}
+                      />
+                      <span className="truncate font-medium">
+                        {condition.type}
+                      </span>
+                    </span>
+                    <span className="truncate text-muted-foreground">
+                      {condition.message ||
+                        condition.reason ||
+                        t('detail.fields.noMessage')}
+                    </span>
+                    <span className="text-right text-muted-foreground">
+                      {condition.status}
+                    </span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+
+        <div className="space-y-3">
+          <CompactEventsCard
+            events={sortedEvents}
+            isLoading={isEventsLoading}
+          />
+          <CompactRelatedResourcesCard
+            resources={relatedResources || []}
+            isLoading={isRelatedLoading}
+          />
+          {Object.keys(labels).length > 0 ? (
+            <MetadataListCard title="common.fields.labels" entries={labels} />
+          ) : null}
+          {Object.keys(annotations).length > 0 ? (
+            <MetadataListCard
+              title="common.fields.annotations"
+              entries={annotations}
+            />
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   IconCheck,
   IconKey,
@@ -9,7 +9,12 @@ import {
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
-import { useClusterList, useOAuthProviderList, useRoleList } from '@/lib/api'
+import {
+  useClusterList,
+  useLDAPSetting,
+  useOAuthProviderList,
+  useRoleList,
+} from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,21 +31,18 @@ interface SettingsHintProps {
 
 export function SettingsHint({ onDismiss }: SettingsHintProps) {
   const { t } = useTranslation()
-  const [isDismissed, setIsDismissed] = useState(false)
-
-  useEffect(() => {
-    const dismissed = localStorage.getItem('settings-hint-dismissed')
-    if (dismissed === 'true') {
-      setIsDismissed(true)
-    }
-  }, [])
+  const [isDismissed, setIsDismissed] = useState(
+    () => localStorage.getItem('settings-hint-dismissed') === 'true'
+  )
 
   const { data: clusters = [] } = useClusterList()
   const { data: oauthProviders = [] } = useOAuthProviderList()
+  const { data: ldapSetting } = useLDAPSetting({ staleTime: 30000 })
   const { data: roles = [] } = useRoleList()
 
   const hasP8S = clusters.some((cluster) => !!cluster.prometheusURL)
-  const hasOAuthProviders = oauthProviders.length > 0
+  const hasOAuthProviders =
+    oauthProviders.length > 0 || ldapSetting?.enabled === true
   const hasRoles = roles.length > 2
 
   if ((hasP8S && hasOAuthProviders && hasRoles) || isDismissed) {
@@ -56,7 +58,7 @@ export function SettingsHint({ onDismiss }: SettingsHintProps) {
   const settingsItems = [
     {
       key: 'p8s',
-      title: t('settings.tabs.p8s', 'Prometheus'),
+      title: t('common.fields.prometheus', 'Prometheus'),
       description: t('settingsHint.p8s.description', 'Configure Prometheus'),
       icon: IconServer,
       completed: hasP8S,
@@ -64,10 +66,10 @@ export function SettingsHint({ onDismiss }: SettingsHintProps) {
     },
     {
       key: 'oauth',
-      title: t('settings.tabs.oauth', 'OAuth'),
+      title: t('settings.tabs.oauth', 'Authentication'),
       description: t(
         'settingsHint.oauth.description',
-        'Set up OAuth providers for authentication'
+        'Set up LDAP or OAuth authentication'
       ),
       icon: IconKey,
       completed: hasOAuthProviders,

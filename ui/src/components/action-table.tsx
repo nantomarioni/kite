@@ -46,12 +46,16 @@ export function ActionTable<T>({
     if (actions.length > 0) {
       const actionColumn: ColumnDef<T> = {
         id: 'actions',
-        header: t('common.actions'),
+        header: t('common.fields.actions'),
         cell: ({ row }) => (
           <div className="text-right">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={t('common.fields.actions', 'Actions')}
+                >
                   •••
                 </Button>
               </DropdownMenuTrigger>
@@ -93,7 +97,7 @@ export function ActionTable<T>({
               {headerGroup.headers.map((header) => (
                 <TableHead
                   key={header.id}
-                  className={header.id === 'actions' ? 'text-right' : ''}
+                  className={header.id === 'actions' ? 'w-14 text-right' : ''}
                 >
                   {header.isPlaceholder
                     ? null
@@ -110,7 +114,12 @@ export function ActionTable<T>({
               data-state={row.getIsSelected() && 'selected'}
             >
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id}>
+                <TableCell
+                  key={cell.id}
+                  className={
+                    cell.column.id === 'actions' ? 'w-14 text-right' : ''
+                  }
+                >
                   {cell.column.columnDef.cell
                     ? flexRender(cell.column.columnDef.cell, cell.getContext())
                     : String(cell.getValue() || '-')}

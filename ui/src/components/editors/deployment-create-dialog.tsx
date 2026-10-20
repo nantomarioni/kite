@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import yaml from 'js-yaml'
 import { Deployment } from 'kubernetes-types/apps/v1'
-import { Container, Volume } from 'kubernetes-types/core/v1'
 import { Plus, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -34,6 +33,15 @@ import { NamespaceSelector } from '../selector/namespace-selector'
 import { PVCSelector } from '../selector/pvc-selector'
 import { SecretSelector } from '../selector/secret-selector'
 import { SimpleYamlEditor } from '../simple-yaml-editor'
+import {
+  ContainerConfig,
+  createDefaultContainer,
+  DeploymentFormData,
+  generateDeploymentYaml,
+  initialFormData,
+  validateStep,
+  VolumeForm,
+} from './deployment-form'
 import { EnvironmentEditor } from './environment-editor'
 import { ImageEditor } from './image-editor'
 
@@ -42,85 +50,6 @@ interface DeploymentCreateDialogProps {
   onOpenChange: (open: boolean) => void
   onSuccess: (deployment: Deployment, namespace: string) => void
   defaultNamespace?: string
-}
-
-interface VolumeForm {
-  name: string
-  sourceType: 'emptyDir' | 'hostPath' | 'configMap' | 'secret' | 'pvc'
-  options?: {
-    path?: string // hostPath
-    configMapName?: string // configMap
-    secretName?: string // secret
-    claimName?: string // pvc
-  }
-}
-
-interface VolumeMountForm {
-  name: string
-  mountPath: string
-  subPath?: string
-  readOnly?: boolean
-}
-
-interface ContainerConfig {
-  name: string
-  image: string
-  port?: number
-  pullPolicy: 'Always' | 'IfNotPresent' | 'Never'
-  resources: {
-    requests: {
-      cpu: string
-      memory: string
-    }
-    limits: {
-      cpu: string
-      memory: string
-    }
-  }
-  volumeMounts?: VolumeMountForm[]
-  container: Container
-}
-
-interface PodSpecForm {
-  volumes?: Array<VolumeForm>
-}
-
-interface DeploymentFormData {
-  name: string
-  namespace: string
-  replicas: number
-  labels: Array<{ key: string; value: string }>
-  podSpec: PodSpecForm
-  containers: ContainerConfig[]
-}
-
-const createDefaultContainer = (index: number): ContainerConfig => ({
-  name: `container-${index + 1}`,
-  image: '',
-  pullPolicy: 'IfNotPresent',
-  resources: {
-    requests: {
-      cpu: '',
-      memory: '',
-    },
-    limits: {
-      cpu: '',
-      memory: '',
-    },
-  },
-  container: {
-    name: `container-${index + 1}`,
-    image: '',
-  },
-})
-
-const initialFormData: DeploymentFormData = {
-  name: '',
-  namespace: 'default',
-  replicas: 1,
-  labels: [{ key: 'app', value: '' }],
-  podSpec: {},
-  containers: [createDefaultContainer(0)],
 }
 
 export function DeploymentCreateDialog({
@@ -263,196 +192,10 @@ export function DeploymentCreateDialog({
     }))
   }
 
-  const generateDeploymentYaml = (): string => {
-    // Build deployment object
-    const labelsObj = formData.labels.reduce(
-      (acc, label) => {
-        if (label.key && label.value) {
-          acc[label.key] = label.value
-        }
-        return acc
-      },
-      {} as Record<string, string>
-    )
-
-    // Ensure app label matches name if not set
-    if (!labelsObj.app && formData.name) {
-      labelsObj.app = formData.name
-    }
-
-    const volumes: Volume[] = (formData.podSpec?.volumes || []).map(
-      (volume): Volume => {
-        switch (volume.sourceType) {
-          case 'emptyDir':
-            return { name: volume.name, emptyDir: {} }
-          case 'hostPath':
-            return {
-              name: volume.name,
-              hostPath: { path: volume.options?.path || '/data' },
-            }
-          case 'configMap':
-            return {
-              name: volume.name,
-              configMap: { name: volume.options?.configMapName || '' },
-            }
-          case 'secret':
-            return {
-              name: volume.name,
-              secret: { secretName: volume.options?.secretName || '' },
-            }
-          case 'pvc':
-            return {
-              name: volume.name,
-              persistentVolumeClaim: {
-                claimName: volume.options?.claimName || '',
-              },
-            }
-          default:
-            return { name: volume.name }
-        }
-      }
-    )
-
-    // Build containers array
-    const containers = formData.containers.map((containerConfig) => {
-      const container: Container = {
-        name: containerConfig.name,
-        image: containerConfig.image,
-        imagePullPolicy: containerConfig.pullPolicy,
-        ...(containerConfig.container.env &&
-          containerConfig.container.env.length > 0 && {
-            env: containerConfig.container.env.filter(
-              (env) => env.name && (env.value || env.valueFrom)
-            ),
-          }),
-        ...(containerConfig.container.envFrom &&
-          containerConfig.container.envFrom.length > 0 && {
-            envFrom: containerConfig.container.envFrom.filter(
-              (source) => source.configMapRef?.name || source.secretRef?.name
-            ),
-          }),
-        ...(containerConfig.port && {
-          ports: [
-            {
-              containerPort: containerConfig.port,
-            },
-          ],
-        }),
-        ...((containerConfig.resources.requests.cpu ||
-          containerConfig.resources.requests.memory ||
-          containerConfig.resources.limits.cpu ||
-          containerConfig.resources.limits.memory) && {
-          resources: {
-            ...((containerConfig.resources.requests.cpu ||
-              containerConfig.resources.requests.memory) && {
-              requests: {
-                ...(containerConfig.resources.requests.cpu && {
-                  cpu: containerConfig.resources.requests.cpu,
-                }),
-                ...(containerConfig.resources.requests.memory && {
-                  memory: containerConfig.resources.requests.memory,
-                }),
-              },
-            }),
-            ...((containerConfig.resources.limits.cpu ||
-              containerConfig.resources.limits.memory) && {
-              limits: {
-                ...(containerConfig.resources.limits.cpu && {
-                  cpu: containerConfig.resources.limits.cpu,
-                }),
-                ...(containerConfig.resources.limits.memory && {
-                  memory: containerConfig.resources.limits.memory,
-                }),
-              },
-            }),
-          },
-        }),
-        ...(containerConfig.volumeMounts &&
-          containerConfig.volumeMounts.length > 0 && {
-            volumeMounts: containerConfig.volumeMounts.map((mount) => ({
-              name: mount.name,
-              mountPath: mount.mountPath,
-              subPath: mount.subPath,
-              readOnly: mount.readOnly === true,
-            })),
-          }),
-      }
-      return container
-    })
-
-    const deployment: Deployment = {
-      apiVersion: 'apps/v1',
-      kind: 'Deployment',
-      metadata: {
-        name: formData.name,
-        namespace: formData.namespace,
-        labels: labelsObj,
-      },
-      spec: {
-        replicas: formData.replicas,
-        selector: {
-          matchLabels: labelsObj,
-        },
-        template: {
-          metadata: {
-            labels: labelsObj,
-          },
-          spec: {
-            volumes,
-            containers,
-          },
-        },
-      },
-    }
-
-    return yaml.dump(deployment, { indent: 2, noRefs: true })
-  }
-
-  const validateStep = (stepNum: number): boolean => {
-    switch (stepNum) {
-      case 1:
-        return !!(
-          formData.name &&
-          formData.namespace &&
-          formData.replicas > 0 &&
-          formData.labels.every((label) => label.key && label.value)
-        )
-      case 2:
-        // validate volumes
-        for (const volume of formData.podSpec?.volumes || []) {
-          if (!volume.name) {
-            return false
-          }
-          if (volume.sourceType === 'hostPath' && !volume.options?.path) {
-            return false
-          }
-          if (
-            volume.sourceType === 'configMap' &&
-            !volume.options?.configMapName
-          ) {
-            return false
-          }
-          if (volume.sourceType === 'secret' && !volume.options?.secretName) {
-            return false
-          }
-          if (volume.sourceType === 'pvc' && !volume.options?.claimName) {
-            return false
-          }
-        }
-        return true
-      case 3:
-        return formData.containers.every(
-          (container) => container.image && container.name
-        )
-      case 4:
-        return true // Review step - always valid
-      default:
-        return true
-    }
-  }
+  const isStepValid = (stepNum: number) => validateStep(formData, stepNum)
 
   const handleNext = () => {
-    if (validateStep(step)) {
+    if (isStepValid(step)) {
       setStep((prev) => Math.min(prev + 1, totalSteps))
     }
   }
@@ -462,14 +205,13 @@ export function DeploymentCreateDialog({
   }
 
   const handleCreate = async () => {
-    if (!validateStep(step)) return
+    if (!isStepValid(step)) return
 
     setIsCreating(true)
     try {
-      // Parse the edited YAML
       let deployment: Deployment
       try {
-        const yamlContent = editedYaml || generateDeploymentYaml()
+        const yamlContent = editedYaml || generateDeploymentYaml(formData)
         deployment = yaml.load(yamlContent) as Deployment
       } catch (yamlError) {
         console.error('Failed to parse YAML:', yamlError)
@@ -559,10 +301,8 @@ export function DeploymentCreateDialog({
             <div className="space-y-2">
               <Label htmlFor="namespace">Namespace *</Label>
               <NamespaceSelector
-                selectedNamespace={formData.namespace}
-                handleNamespaceChange={(namespace) =>
-                  updateFormData({ namespace })
-                }
+                value={formData.namespace}
+                onChange={(namespace) => updateFormData({ namespace })}
               />
             </div>
             <div className="space-y-2">
@@ -627,7 +367,7 @@ export function DeploymentCreateDialog({
       case 2:
         return (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <Label>Volume</Label>
               <Button
                 type="button"
@@ -740,7 +480,7 @@ export function DeploymentCreateDialog({
       case 3:
         return (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <Label className="text-lg font-medium">Containers</Label>
               <Button
                 type="button"
@@ -755,7 +495,7 @@ export function DeploymentCreateDialog({
             {formData.containers.map((containerConfig, containerIndex) => (
               <Card key={containerIndex}>
                 <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle className="text-base">
                       Container {containerIndex + 1}
                     </CardTitle>
@@ -765,6 +505,7 @@ export function DeploymentCreateDialog({
                         variant="outline"
                         size="sm"
                         onClick={() => removeContainer(containerIndex)}
+                        aria-label={`Remove container ${containerIndex + 1}`}
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -772,7 +513,7 @@ export function DeploymentCreateDialog({
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <ImageEditor
                         container={containerConfig.container}
@@ -811,7 +552,7 @@ export function DeploymentCreateDialog({
 
                   <div className="space-y-2">
                     <Label>Resources (optional)</Label>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-sm text-muted-foreground">
                           Requests
@@ -904,7 +645,7 @@ export function DeploymentCreateDialog({
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor={`port-${containerIndex}`}>
                         Container Port (optional)
@@ -934,9 +675,7 @@ export function DeploymentCreateDialog({
                         onValueChange={(value) =>
                           updateContainer(containerIndex, {
                             pullPolicy: value as
-                              | 'Always'
-                              | 'IfNotPresent'
-                              | 'Never',
+                              'Always' | 'IfNotPresent' | 'Never',
                           })
                         }
                       >
@@ -955,7 +694,7 @@ export function DeploymentCreateDialog({
                   </div>
                   {(formData.podSpec?.volumes?.length || 0) > 0 && (
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <Label>Volume Mounts</Label>
                         <Button
                           type="button"
@@ -990,7 +729,7 @@ export function DeploymentCreateDialog({
                         (mount, mountIndex) => (
                           <div
                             key={mountIndex}
-                            className="flex gap-2 items-center"
+                            className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center"
                           >
                             <Select
                               value={mount.name}
@@ -1007,7 +746,7 @@ export function DeploymentCreateDialog({
                                 })
                               }}
                             >
-                              <SelectTrigger className="w-[160px]">
+                              <SelectTrigger className="w-full sm:w-[160px]">
                                 <SelectValue placeholder="Volume name" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1071,7 +810,7 @@ export function DeploymentCreateDialog({
                                 })
                               }}
                             >
-                              <SelectTrigger className="w-[160px]">
+                              <SelectTrigger className="w-full sm:w-[160px]">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -1085,6 +824,7 @@ export function DeploymentCreateDialog({
                               variant="outline"
                               size="icon"
                               className="w-7 h-7"
+                              aria-label={`Remove volume mount ${mountIndex + 1}`}
                               onClick={() => {
                                 const updatedMounts =
                                   containerConfig.volumeMounts?.filter(
@@ -1121,7 +861,7 @@ export function DeploymentCreateDialog({
               directly in the editor below.
             </p>
             <SimpleYamlEditor
-              value={generateDeploymentYaml()}
+              value={generateDeploymentYaml(formData)}
               onChange={(value) => setEditedYaml(value || '')}
               disabled={false}
               height="500px"
@@ -1219,13 +959,13 @@ export function DeploymentCreateDialog({
                 Cancel
               </Button>
               {step < totalSteps ? (
-                <Button onClick={handleNext} disabled={!validateStep(step)}>
+                <Button onClick={handleNext} disabled={!isStepValid(step)}>
                   Next
                 </Button>
               ) : (
                 <Button
                   onClick={handleCreate}
-                  disabled={!validateStep(step) || isCreating}
+                  disabled={!isStepValid(step) || isCreating}
                 >
                   {isCreating ? 'Creating...' : 'Create Deployment'}
                 </Button>

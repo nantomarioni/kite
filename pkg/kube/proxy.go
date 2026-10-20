@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/rest"
@@ -34,6 +35,11 @@ func HandleProxy(c *gin.Context, client *K8sClient, kind, namespace, name, proxy
 	req.Header = cloneHeader(c.Request.Header)
 	req.Header.Del("Authorization")
 	req.Header.Del("Cookie")
+	req.Header.Del("Connection")
+	req.Header.Del("Upgrade")
+	req.Header.Del("Keep-Alive")
+	req.Header.Del("Proxy-Connection")
+	req.Header.Del("Transfer-Encoding")
 
 	resp, err := httpClient.Do(req)
 
@@ -55,17 +61,37 @@ func HandleProxy(c *gin.Context, client *K8sClient, kind, namespace, name, proxy
 	}
 }
 
-func buildProxyURL(host, kind, namespace, name, path, rawQuery string) (string, error) {
-	path, err := url.JoinPath(host, "api/v1/namespaces", namespace, kind, name, "proxy", path)
+func buildProxyURL(host, kind, namespace, name, proxyPath, rawQuery string) (string, error) {
+	if strings.Contains(name, "..") {
+		return "", errors.New("invalid proxy path: path traversal detected")
+	}
+
+	base, err := url.JoinPath(host, "api/v1/namespaces", namespace, kind, name, "proxy")
 	if err != nil {
 		return "", err
 	}
 
-	query, err := url.ParseQuery(rawQuery)
+	for _, segment := range strings.Split(proxyPath, "/") {
+		if segment == ".." {
+			return "", errors.New("invalid proxy path: path traversal detected")
+		}
+	}
+
+	u, err := url.Parse(base)
 	if err != nil {
 		return "", err
 	}
-	u, err := url.Parse(path)
+	u.Path = strings.TrimSuffix(u.Path, "/") + "/" + strings.TrimPrefix(proxyPath, "/")
+	u.RawPath = ""
+
+	// Defensive: ensure the cleaned path still contains the expected
+	// namespace/kind/name/proxy prefix and has not escaped it.
+	prefix := "/api/v1/namespaces/" + namespace + "/" + kind + "/" + name + "/proxy"
+	if !strings.Contains(u.Path, prefix) {
+		return "", errors.New("invalid proxy path: path traversal detected")
+	}
+
+	query, err := url.ParseQuery(rawQuery)
 	if err != nil {
 		return "", err
 	}

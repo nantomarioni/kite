@@ -1,23 +1,30 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { CustomResourceDefinition } from 'kubernetes-types/apiextensions/v1'
 import { Link } from 'react-router-dom'
 
+import { createSearchFilter } from '@/lib/k8s'
 import { getAge } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ResourceTable } from '@/components/resource-table'
 
-export function CRDListPage() {
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<CustomResourceDefinition>()
+const searchQueryFilter = createSearchFilter<CustomResourceDefinition>(
+  (crd) => crd.metadata?.name,
+  (crd) => crd.spec?.group,
+  (crd) => crd.spec?.scope,
+  (crd) => crd.spec?.versions?.map((v: { name: string }) => v.name)
+)
 
+const columnHelper = createColumnHelper<CustomResourceDefinition>()
+
+export function CRDListPage() {
   // Define columns for the CRD table
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
         header: 'Name',
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link to={`/crds/${row.original.metadata!.name}`}>
               {row.original.metadata!.name}
             </Link>
@@ -27,36 +34,42 @@ export function CRDListPage() {
       columnHelper.accessor('spec.group', {
         header: 'Group',
         enableColumnFilter: true,
-        cell: ({ getValue }) => <span className=" text-sm">{getValue()}</span>,
+        cell: ({ getValue }) => (
+          <span className="text-sm font-mono">{getValue()}</span>
+        ),
       }),
-      columnHelper.accessor('spec.versions', {
-        header: 'Versions',
-        cell: ({ getValue }) => {
-          const versions = getValue() || []
-          return (
-            <div className="flex flex-wrap gap-1">
-              {versions.map(
-                (
-                  version: {
-                    name: string
-                    served?: boolean
-                    storage?: boolean
-                  },
-                  index: number
-                ) => (
-                  <Badge
-                    key={index}
-                    variant={version.served ? 'default' : 'secondary'}
-                    className="text-xs"
-                  >
-                    {version.name}
-                  </Badge>
-                )
-              )}
-            </div>
-          )
-        },
-      }),
+      columnHelper.accessor(
+        (row) => row.spec?.versions?.map((version) => version.name).join(', '),
+        {
+          id: 'spec_versions',
+          header: 'Versions',
+          cell: ({ row }) => {
+            const versions = row.original.spec?.versions || []
+            return (
+              <div className="flex flex-wrap gap-1">
+                {versions.map(
+                  (
+                    version: {
+                      name: string
+                      served?: boolean
+                      storage?: boolean
+                    },
+                    index: number
+                  ) => (
+                    <Badge
+                      key={index}
+                      variant={version.served ? 'default' : 'secondary'}
+                      className="text-xs font-mono"
+                    >
+                      {version.name}
+                    </Badge>
+                  )
+                )}
+              </div>
+            )
+          },
+        }
+      ),
       columnHelper.accessor('spec.scope', {
         header: 'Scope',
         cell: ({ getValue }) => (
@@ -68,25 +81,33 @@ export function CRDListPage() {
           </Badge>
         ),
       }),
-      columnHelper.accessor('status.conditions', {
-        header: 'Status',
-        cell: ({ getValue }) => {
-          const conditions = getValue() || []
-          const establishedCondition = conditions.find(
-            (c: { type: string; status: string }) => c.type === 'Established'
+      columnHelper.accessor(
+        (row) => {
+          const establishedCondition = row.status?.conditions?.find(
+            (condition) => condition.type === 'Established'
           )
-          const isEstablished = establishedCondition?.status === 'True'
-
-          return (
-            <Badge
-              variant={isEstablished ? 'default' : 'destructive'}
-              className="text-xs"
-            >
-              {isEstablished ? 'Established' : 'Not Ready'}
-            </Badge>
-          )
+          return establishedCondition?.status === 'True'
+            ? 'Established'
+            : 'Not Ready'
         },
-      }),
+        {
+          id: 'status_conditions',
+          header: 'Status',
+          cell: ({ getValue }) => {
+            const status = getValue()
+            const isEstablished = status === 'Established'
+
+            return (
+              <Badge
+                variant={isEstablished ? 'default' : 'destructive'}
+                className="text-xs"
+              >
+                {status}
+              </Badge>
+            )
+          },
+        }
+      ),
       columnHelper.accessor('metadata.creationTimestamp', {
         header: 'Age',
         cell: ({ getValue }) => {
@@ -94,23 +115,6 @@ export function CRDListPage() {
         },
       }),
     ],
-    [columnHelper]
-  )
-
-  // Custom search filter for CRDs
-  const searchQueryFilter = useCallback(
-    (crd: CustomResourceDefinition, query: string) => {
-      const searchFields = [
-        crd.metadata?.name || '',
-        crd.spec?.group || '',
-        crd.spec?.scope || '',
-        ...(crd.spec?.versions?.map((v: { name: string }) => v.name) || []),
-      ]
-
-      return searchFields.some((field) =>
-        field.toLowerCase().includes(query.toLowerCase())
-      )
-    },
     []
   )
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Check, ChevronsUpDown } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { SimpleContainer } from '@/types/k8s'
 import { cn } from '@/lib/utils'
@@ -34,8 +35,13 @@ export function ContainerSelector({
   placeholder = 'Select container...',
 }: ContainerSelectorProps) {
   const [open, setOpen] = useState(false)
+  const { t } = useTranslation()
 
-  const allOption = { name: 'All Containers', image: '', init: false }
+  const allOption: SimpleContainer[number] = {
+    name: 'All Containers',
+    image: '',
+    init: false,
+  }
   const options = showAllOption ? [allOption, ...containers] : containers
 
   const selectedOption = selectedContainer
@@ -49,13 +55,16 @@ export function ContainerSelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="max-w-[300px] justify-between"
+          className="w-full min-w-0 justify-between md:w-auto md:min-w-[12rem] md:max-w-[300px]"
         >
-          {selectedOption ? selectedOption.name : placeholder}
+          <span className="truncate">
+            {selectedOption ? selectedOption.name : placeholder}
+            {selectedOption?.ephemeral && ` (${t('pods.debug')})`}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="max-w-[300px] p-0">
+      <PopoverContent className="w-[max(var(--radix-popover-trigger-width),18rem)] max-w-[min(300px,calc(100vw-1rem))] p-0">
         <Command>
           <CommandInput placeholder="Search containers..." />
           <CommandList>
@@ -82,17 +91,22 @@ export function ContainerSelector({
                         : 'opacity-0'
                     )}
                   />
-                  <div className="flex flex-col">
-                    <span className="font-medium">
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium">
                       {container.name}
                       {container.init && (
                         <span className="text-xs text-muted-foreground ml-1">
                           (init)
                         </span>
                       )}
+                      {container.ephemeral && (
+                        <span className="text-xs text-muted-foreground ml-1">
+                          ({t('pods.debug')})
+                        </span>
+                      )}
                     </span>
                     {container.image && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="truncate text-xs text-muted-foreground">
                         {container.image}
                       </span>
                     )}

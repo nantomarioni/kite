@@ -34,7 +34,7 @@ func loadRolesFromDB() error {
 	}
 
 	var roles []model.Role
-	if err := model.DB.WithContext(context.Background()).Preload("Assignments").Find(&roles).Error; err != nil {
+	if err := model.DB.Preload("Assignments").Find(&roles).Error; err != nil {
 		return err
 	}
 
@@ -71,20 +71,25 @@ var (
 	SyncNow = make(chan struct{}, 1)
 )
 
+// TriggerSync sends a non-blocking signal to refresh RBAC config from the database.
+func TriggerSync() {
+	select {
+	case SyncNow <- struct{}{}:
+	default:
+	}
+}
+
 func SyncRolesConfig() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-	SyncNow <- struct{}{}
+	TriggerSync()
 	for {
 		select {
 		case <-ticker.C:
-			if err := loadRolesFromDB(); err != nil {
-				klog.Errorf("failed to sync rbac from db: %v", err)
-			}
 		case <-SyncNow:
-			if err := loadRolesFromDB(); err != nil {
-				klog.Errorf("failed to sync rbac from db: %v", err)
-			}
+		}
+		if err := loadRolesFromDB(); err != nil {
+			klog.Errorf("failed to sync rbac from db: %v", err)
 		}
 	}
 }

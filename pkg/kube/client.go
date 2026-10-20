@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/zxh326/kite/pkg/tracing"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -25,31 +27,131 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var runtimeScheme = runtime.NewScheme()
 
+const (
+	defaultCacheSyncTimeout = 60 * time.Second
+	defaultKubeAPIQPS       = 50
+	defaultKubeAPIBurst     = 100
+)
+
+// cacheSyncTimeout returns the configured cache sync timeout, overridable via
+// the KITE_CACHE_SYNC_TIMEOUT env var (in seconds). The initial LIST for
+// informers on large/remote clusters can take a long time, so the default is
+// generous and remains configurable for edge cases.
+func cacheSyncTimeout() time.Duration {
+	if v := os.Getenv("KITE_CACHE_SYNC_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return defaultCacheSyncTimeout
+}
+
+// kubeAPIQPS returns the QPS limit for the Kubernetes API client, overridable
+// via the KITE_KUBE_API_QPS env var. Defaults to 50 (client-go default is 5,
+// which is too low for large/remote clusters during the initial cache sync).
+func kubeAPIQPS() float32 {
+	if v := os.Getenv("KITE_KUBE_API_QPS"); v != "" {
+		if qps, err := strconv.ParseFloat(v, 32); err == nil && qps > 0 {
+			return float32(qps)
+		}
+	}
+	return defaultKubeAPIQPS
+}
+
+// kubeAPIBurst returns the burst limit for the Kubernetes API client,
+// overridable via the KITE_KUBE_API_BURST env var. Defaults to 100 (client-go
+// default is 10).
+func kubeAPIBurst() int {
+	if v := os.Getenv("KITE_KUBE_API_BURST"); v != "" {
+		if burst, err := strconv.Atoi(v); err == nil && burst > 0 {
+			return burst
+		}
+	}
+	return defaultKubeAPIBurst
+}
+
 func init() {
-	ctrllog.SetLogger(klog.NewKlogr())
+	ctrllog.SetLogger(controllerRuntimeLogger(klog.NewKlogr()))
 	_ = scheme.AddToScheme(runtimeScheme)
 	_ = apiextensionsv1.AddToScheme(runtimeScheme)
-	_ = gatewayapiv1.Install(runtimeScheme)
 	_ = metricsv1.AddToScheme(runtimeScheme)
+}
+
+func controllerRuntimeLogger(logger logr.Logger) logr.Logger {
+	return logr.New(controllerRuntimeLogSink{sink: logger.GetSink()})
+}
+
+type controllerRuntimeLogSink struct {
+	sink logr.LogSink
+}
+
+func (l controllerRuntimeLogSink) Init(info logr.RuntimeInfo) {
+	l.sink.Init(info)
+}
+
+func (l controllerRuntimeLogSink) Enabled(level int) bool {
+	return klog.V(2).Enabled() && l.sink.Enabled(level)
+}
+
+func (l controllerRuntimeLogSink) Info(level int, msg string, keysAndValues ...any) {
+	if !klog.V(2).Enabled() {
+		return
+	}
+	l.sink.Info(level, msg, keysAndValues...)
+}
+
+func (l controllerRuntimeLogSink) Error(err error, msg string, keysAndValues ...any) {
+	if !klog.V(2).Enabled() {
+		return
+	}
+	l.sink.Error(err, msg, keysAndValues...)
+}
+
+func (l controllerRuntimeLogSink) WithValues(keysAndValues ...any) logr.LogSink {
+	l.sink = l.sink.WithValues(keysAndValues...)
+	return l
+}
+
+func (l controllerRuntimeLogSink) WithName(name string) logr.LogSink {
+	l.sink = l.sink.WithName(name)
+	return l
+}
+
+func (l controllerRuntimeLogSink) WithCallDepth(depth int) logr.LogSink {
+	if sink, ok := l.sink.(logr.CallDepthLogSink); ok {
+		l.sink = sink.WithCallDepth(depth)
+	}
+	return l
 }
 
 // K8sClient holds the Kubernetes client instances
 type K8sClient struct {
 	client.Client
-	ClientSet     *kubernetes.Clientset
+	ClientSet     kubernetes.Interface
 	Configuration *rest.Config
 	MetricsClient *metricsclient.Clientset
+	CacheEnabled  bool // true when using controller-runtime informer cache
 
 	cancel context.CancelFunc
 }
 
 // NewClient creates a K8sClient from a rest.Config
 func NewClient(config *rest.Config) (*K8sClient, error) {
+	// Tune QPS/Burst so the initial cache sync LIST on large/remote clusters is
+	// not throttled by the client-go defaults (QPS=5, Burst=10). Values are
+	// overridable via KITE_KUBE_API_QPS and KITE_KUBE_API_BURST. A value
+	// explicitly set on the rest.Config (e.g. from kubeconfig) is preserved.
+	if config.QPS == 0 {
+		config.QPS = kubeAPIQPS()
+	}
+	if config.Burst == 0 {
+		config.Burst = kubeAPIBurst()
+	}
+
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -61,9 +163,10 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	cacheEnabled := os.Getenv("DISABLE_CACHE") != "true"
 
 	var c client.Client
-	if os.Getenv("DISABLE_CACHE") == "true" {
+	if !cacheEnabled {
 		c, err = client.New(config, client.Options{
 			Scheme: runtimeScheme,
 		})
@@ -105,9 +208,13 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 				fmt.Printf("Error starting manager: %v\n", err)
 			}
 		}()
-		if !mgr.GetCache().WaitForCacheSync(ctx) {
+		syncCtx, syncCancel := context.WithTimeout(ctx, cacheSyncTimeout())
+		defer syncCancel()
+		if !mgr.GetCache().WaitForCacheSync(syncCtx) {
 			cancel()
-			return nil, fmt.Errorf("failed to wait for cache sync")
+			return nil, fmt.Errorf("failed to wait for cache sync (timeout: %s); "+
+				"the cluster may be too large or the API server too slow. "+
+				"Consider increasing KITE_CACHE_SYNC_TIMEOUT or setting DISABLE_CACHE=true", cacheSyncTimeout())
 		}
 		c = tracing.WrapClient(mgr.GetClient(), true)
 	}
@@ -117,6 +224,7 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 		ClientSet:     clientset,
 		Configuration: config,
 		MetricsClient: metricsClient,
+		CacheEnabled:  cacheEnabled,
 		cancel:        cancel,
 	}, nil
 }

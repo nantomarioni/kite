@@ -8,7 +8,8 @@ Kite 支持多种用户管理方式，结合 OAuth 与本地密码用户，配�
 
 如何配置 OAuth 见 [OAuth 配置指南](./oauth-setup)
 
-- **密码用户**： 通过用户名和密码登录。
+- **密码用户**： 通过用户名和密码登录。密码用户可以启用认证器应用 MFA，也可以注册 Passkey 用于免密码登录。
+- **API 密钥**：用于脚本、CI/CD 或外部系统调用 Kite API。参见 [API 认证](../api/authentication)。
 
 ## 用户管理
 
@@ -23,10 +24,23 @@ Kite 支持多种用户管理方式，结合 OAuth 与本地密码用户，配�
 
 ![User Management](../../screenshots/user-m.png)
 
+## 账号安全
+
+MFA 和 Passkey 登录默认启用，管理员可以在 **设置 -> 认证** 中管理。
+
+密码用户可以在账号设置弹窗中管理自己的安全设置：
+
+- 使用 TOTP 认证器应用启用 MFA
+- 添加或删除 Passkey
+- 在启用 Passkey 登录后使用 Passkey 登录
+
+MFA 和 Passkey 仅适用于密码用户。OAuth 和 LDAP 用户应使用身份提供商侧的安全策略。
+
 ## 最佳实践
 
 - 推荐优先使用 OAuth 用户，实现统一身份管理
 - 密码用户适用于特殊或临时场景
+- 为密码用户启用 MFA 或 Passkey
 - 定期审查用户列表和角色分配，确保权限最小化
 - 禁用未使用账号，降低安全风险
 

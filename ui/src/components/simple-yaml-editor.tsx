@@ -1,56 +1,47 @@
-import { Editor } from '@monaco-editor/react'
-import { formatHex } from 'culori'
+import type { YamlEditorProps } from '@kite-dev/plugin-sdk/ui'
+
+import { MonacoEditor } from '@/lib/monaco-loader'
+import {
+  defineMonacoBackgroundThemes,
+  useMonacoBackgroundColor,
+} from '@/lib/monaco-theme'
 
 import { useAppearance } from './appearance-provider'
-
-interface SimpleYamlEditorProps {
-  value: string
-  onChange: (value: string | undefined) => void
-  disabled?: boolean
-  height?: string
-}
 
 export function SimpleYamlEditor({
   value,
   onChange,
   disabled = false,
   height = '400px',
-}: SimpleYamlEditorProps) {
+}: YamlEditorProps) {
   const { actualTheme, colorTheme } = useAppearance()
-
-  const getCardBackgroundColor = () => {
-    const card = getComputedStyle(document.documentElement)
-      .getPropertyValue('--background')
-      .trim()
-    if (!card) {
-      return actualTheme === 'dark' ? '#18181b' : '#ffffff'
-    }
-    return formatHex(card) || (actualTheme === 'dark' ? '#18181b' : '#ffffff')
-  }
+  const themeMode = actualTheme === 'dark' ? 'dark' : 'light'
+  const backgroundColor = useMonacoBackgroundColor(
+    '--background',
+    themeMode,
+    colorTheme
+  )
   return (
     <div className="border rounded-md overflow-hidden">
-      <Editor
+      <MonacoEditor
+        key={`simple-yaml-editor-${colorTheme}-${actualTheme}-${backgroundColor}`}
         height={height}
         defaultLanguage="yaml"
         value={value}
         onChange={onChange}
+        loading={
+          <div
+            className="flex items-center justify-center h-full text-muted-foreground"
+            style={{ height }}
+          >
+            Loading editor...
+          </div>
+        }
         beforeMount={(monaco) => {
-          const cardBgColor = getCardBackgroundColor()
-          monaco.editor.defineTheme(`custom-dark-${colorTheme}`, {
-            base: 'vs-dark',
-            inherit: true,
-            rules: [],
-            colors: {
-              'editor.background': cardBgColor,
-            },
-          })
-          monaco.editor.defineTheme(`custom-vs-${colorTheme}`, {
-            base: 'vs',
-            inherit: true,
-            rules: [],
-            colors: {
-              'editor.background': cardBgColor,
-            },
+          defineMonacoBackgroundThemes(monaco, {
+            darkThemeName: `custom-dark-${colorTheme}`,
+            lightThemeName: `custom-vs-${colorTheme}`,
+            backgroundColor,
           })
         }}
         theme={
@@ -80,11 +71,6 @@ export function SimpleYamlEditor({
           fontFamily:
             "'Maple Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace",
         }}
-        loading={
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            Loading editor...
-          </div>
-        }
       />
     </div>
   )

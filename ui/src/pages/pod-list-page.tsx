@@ -1,11 +1,11 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { Pod } from 'kubernetes-types/core/v1'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { PodWithMetrics } from '@/types/api'
-import { getPodStatus } from '@/lib/k8s'
+import { createSearchFilter, getPodStatus } from '@/lib/k8s'
 import { formatDate, getAge } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -17,18 +17,24 @@ import { MetricCell } from '@/components/metrics-cell'
 import { PodStatusIcon } from '@/components/pod-status-icon'
 import { ResourceTable } from '@/components/resource-table'
 
+const podSearchFilter = createSearchFilter<Pod>(
+  (p) => p.metadata?.name,
+  (p) => p.spec?.nodeName,
+  (p) => p.status?.podIP
+)
+
+const columnHelper = createColumnHelper<PodWithMetrics>()
+
 export function PodListPage() {
   const { t } = useTranslation()
-  // Define column helper outside of any hooks
-  const columnHelper = createColumnHelper<PodWithMetrics>()
 
   // Define columns for the pod table - moved outside render cycle for better performance
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
-        header: t('common.name'),
+        header: t('common.fields.name'),
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link
               to={`/pods/${row.original.metadata!.namespace}/${
                 row.original.metadata!.name
@@ -39,9 +45,9 @@ export function PodListPage() {
           </div>
         ),
       }),
-      columnHelper.accessor((row) => row.status?.containerStatuses, {
+      columnHelper.accessor((row) => getPodStatus(row).readyContainers, {
         id: 'containers',
-        header: t('pods.ready'),
+        header: t('common.fields.ready'),
         cell: ({ row }) => {
           const status = getPodStatus(row.original)
           return (
@@ -51,8 +57,8 @@ export function PodListPage() {
           )
         },
       }),
-      columnHelper.accessor((row) => row.status?.phase, {
-        header: t('common.status'),
+      columnHelper.accessor((row) => getPodStatus(row).reason, {
+        header: t('common.fields.status'),
         enableColumnFilter: true,
         cell: ({ row }) => {
           const status = getPodStatus(row.original)
@@ -64,9 +70,9 @@ export function PodListPage() {
           )
         },
       }),
-      columnHelper.accessor((row) => row.status, {
+      columnHelper.accessor((row) => getPodStatus(row).restarts, {
         id: 'restarts',
-        header: t('pods.restarts'),
+        header: t('common.fields.restarts'),
         cell: ({ row }) => {
           const status = getPodStatus(row.original)
           return (
@@ -104,12 +110,12 @@ export function PodListPage() {
       }),
       columnHelper.accessor((row) => row.spec?.nodeName, {
         id: 'nodeName',
-        header: t('pods.node'),
+        header: t('common.fields.node'),
         enableColumnFilter: true,
         cell: ({ row }) => {
           if (row.original.spec?.nodeName) {
             return (
-              <div className="font-medium text-blue-500 hover:underline">
+              <div className="font-medium app-link">
                 <Link to={`/nodes/${row.original.spec?.nodeName}`}>
                   {row.original.spec?.nodeName}
                 </Link>
@@ -121,7 +127,7 @@ export function PodListPage() {
       }),
       columnHelper.accessor((row) => row.metadata?.creationTimestamp, {
         id: 'creationTimestamp',
-        header: t('common.created'),
+        header: t('common.fields.created'),
         cell: ({ getValue }) => {
           const dateStr = formatDate(getValue() || '')
           return (
@@ -137,17 +143,8 @@ export function PodListPage() {
         },
       }),
     ],
-    [columnHelper, t]
+    [t]
   )
-
-  // Custom filter for pod search
-  const podSearchFilter = useCallback((pod: Pod, query: string) => {
-    return (
-      pod.metadata?.name?.toLowerCase().includes(query) ||
-      (pod.spec?.nodeName?.toLowerCase() || '').includes(query) ||
-      (pod.status?.podIP?.toLowerCase() || '').includes(query)
-    )
-  }, [])
 
   return (
     <ResourceTable<Pod>

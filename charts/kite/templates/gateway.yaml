@@ -91,6 +91,8 @@ spec:
       backendRefs:
         - name: {{ include "kite.fullname" $ }}
           port: {{ $.Values.service.port }}
+      timeouts:
+        request: {{ if .timeouts }}{{ .timeouts.request | default "120s" }}{{ else }}"120s"{{ end }}
     {{- end }}
 {{- end }}
 {{- end }}

@@ -19,6 +19,9 @@ type OAuthManager struct {
 	jwtSecret string
 }
 
+// Keep headroom for cookie name and attributes within common 4096-byte browser limits.
+const maxAuthTokenCookieValueLength = 3800
+
 func NewOAuthManager() *OAuthManager {
 	return &OAuthManager{
 		jwtSecret: common.JwtSecret,
@@ -90,6 +93,17 @@ func (om *OAuthManager) GenerateJWT(user *model.User, refreshToken string) (stri
 		},
 	}
 
+	tokenString, err := om.signJWT(claims)
+	if err != nil {
+		return "", err
+	}
+	if len(tokenString) > maxAuthTokenCookieValueLength {
+		claims.RefreshToken = "" // Drop refresh token from JWT if it exceeds size limits
+	}
+	return om.signJWT(claims)
+}
+
+func (om *OAuthManager) signJWT(claims Claims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(om.jwtSecret))
 }
@@ -134,13 +148,18 @@ func (om *OAuthManager) RefreshJWT(c *gin.Context, tokenString string) (string, 
 		return "", fmt.Errorf("invalid token signature")
 	}
 
-	// Check if token is close to expiration (within 1 hour)
-	if time.Until(claims.ExpiresAt.Time) > time.Hour {
-		// Token not close to expiry - return original token
-		return tokenString, nil
+	if !time.Now().After(claims.ExpiresAt.Time) {
+		user := &model.User{
+			Model: model.Model{
+				ID: claims.UserID,
+			},
+			Username: claims.Username,
+			Provider: claims.Provider,
+		}
+
+		return om.GenerateJWT(user, claims.RefreshToken)
 	}
 
-	// If we have a refresh token, try to refresh the OAuth token
 	if claims.RefreshToken != "" {
 		provider, err := om.GetProvider(c, claims.Provider)
 		if err != nil {
@@ -157,6 +176,7 @@ func (om *OAuthManager) RefreshJWT(c *gin.Context, tokenString string) (string, 
 		if err != nil {
 			return "", err
 		}
+		user.ID = claims.UserID
 
 		// Generate new JWT with refreshed token
 		newRefreshToken := tokenResp.RefreshToken
@@ -167,15 +187,5 @@ func (om *OAuthManager) RefreshJWT(c *gin.Context, tokenString string) (string, 
 		return om.GenerateJWT(user, newRefreshToken)
 	}
 
-	// If no refresh token available, just generate a new JWT with existing claims
-	// This is for providers like GitHub that don't expire tokens
-	user := &model.User{
-		Model: model.Model{
-			ID: claims.UserID,
-		},
-		Username: claims.Username,
-		Provider: claims.Provider,
-	}
-
-	return om.GenerateJWT(user, "")
+	return "", fmt.Errorf("token expired")
 }

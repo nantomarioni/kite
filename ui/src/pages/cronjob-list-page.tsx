@@ -1,9 +1,10 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { createColumnHelper } from '@tanstack/react-table'
 import { CronJob } from 'kubernetes-types/batch/v1'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
+import { createSearchFilter } from '@/lib/k8s'
 import { formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { ResourceTable } from '@/components/resource-table'
@@ -16,16 +17,22 @@ function getSuspendBadge(cronjob: CronJob) {
   }
 }
 
+const cronJobSearchFilter = createSearchFilter<CronJob>(
+  (cj) => cj.metadata?.name,
+  (cj) => cj.metadata?.namespace
+)
+
+const columnHelper = createColumnHelper<CronJob>()
+
 export function CronJobListPage() {
   const { t } = useTranslation()
-  const columnHelper = createColumnHelper<CronJob>()
 
   const columns = useMemo(
     () => [
       columnHelper.accessor('metadata.name', {
-        header: t('common.name'),
+        header: t('common.fields.name'),
         cell: ({ row }) => (
-          <div className="font-medium text-blue-500 hover:underline">
+          <div className="font-medium app-link">
             <Link
               to={`/cronjobs/${row.original.metadata!.namespace}/${
                 row.original.metadata!.name
@@ -93,15 +100,8 @@ export function CronJobListPage() {
         },
       }),
     ],
-    [columnHelper, t]
+    [t]
   )
-
-  const cronJobSearchFilter = useCallback((cronjob: CronJob, query: string) => {
-    const lowerQuery = query.toLowerCase()
-    const name = cronjob.metadata?.name?.toLowerCase() || ''
-    const namespace = cronjob.metadata?.namespace?.toLowerCase() || ''
-    return name.includes(lowerQuery) || namespace.includes(lowerQuery)
-  }, [])
 
   return (
     <ResourceTable

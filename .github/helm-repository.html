@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -60,25 +60,32 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>🪁 Kite Helm Repository</h1>
+        <h1>🪁 Kite Helm Charts</h1>
         <p>Modern Kubernetes Dashboard</p>
       </div>
 
       <h2>Quick Start</h2>
 
       <div class="step">
-        <h3>1. Add Repository</h3>
+        <h3>1. Install from OCI registry</h3>
         <div class="code">
-          helm repo add kite https://zxh326.github.io/kite<br />helm repo update
+          helm install kite oci://ghcr.io/kite-org/charts/kite -n kube-system
         </div>
       </div>
 
       <div class="step">
-        <h3>2. Install Chart</h3>
+        <h3>2. Or add repository</h3>
+        <div class="code">
+          helm repo add kite https://charts.kitehq.dev<br />helm repo update
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>3. Install Chart</h3>
         <div class="code">helm install kite kite/kite -n kube-system</div>
       </div>
       <h2>Available Versions</h2>
-      <div class="code">helm helm search repo kite</div>
+      <div class="code">helm search repo kite</div>
       or view the <a href="./index.yaml">Repository Index</a>.
     </div>
   </body>

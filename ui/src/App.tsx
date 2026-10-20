@@ -1,10 +1,13 @@
 import './App.css'
 
-import { useEffect } from 'react'
+import { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Outlet, useSearchParams } from 'react-router-dom'
 
+import { AIChatbox, StandaloneAIChatbox } from './components/ai-chat/ai-chatbox'
 import { AppSidebar } from './components/app-sidebar'
+import { ErrorBoundary } from './components/error-boundary'
+import { FloatingTerminal } from './components/floating-terminal'
 import { GlobalSearch } from './components/global-search'
 import {
   GlobalSearchProvider,
@@ -13,19 +16,14 @@ import {
 import { SiteHeader } from './components/site-header'
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar'
 import { Toaster } from './components/ui/sonner'
+import { AIChatProvider } from './contexts/ai-chat-context'
 import { ClusterProvider } from './contexts/cluster-context'
+import { TerminalProvider, useTerminal } from './contexts/terminal-context'
 import { useCluster } from './hooks/use-cluster'
-import { apiClient } from './lib/api-client'
 
-function ClusterAwareApp() {
+function ClusterGate({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
-  const { currentCluster, isLoading, error } = useCluster()
-
-  useEffect(() => {
-    apiClient.setClusterProvider(() => {
-      return currentCluster || localStorage.getItem('current-cluster')
-    })
-  }, [currentCluster])
+  const { isLoading, error } = useCluster()
 
   if (isLoading) {
     return (
@@ -48,11 +46,12 @@ function ClusterAwareApp() {
     )
   }
 
-  return <AppContent />
+  return <>{children}</>
 }
 
 function AppContent() {
   const { isOpen, closeSearch } = useGlobalSearch()
+  const { isOpen: isTerminalOpen } = useTerminal()
   const [searchParams] = useSearchParams()
   const isIframe = searchParams.get('iframe') === 'true'
 
@@ -64,30 +63,64 @@ function AppContent() {
     <>
       <SidebarProvider>
         <AppSidebar variant="inset" />
-        <SidebarInset className="h-screen overflow-y-auto scrollbar-hide">
+        <SidebarInset className="h-dvh overflow-y-auto overscroll-none scrollbar-hide">
           <SiteHeader />
-          <div className="@container/main">
-            <div className="flex flex-col gap-4 py-4 md:gap-6">
-              <div className="px-4 lg:px-6">
-                <Outlet />
+          <div className="@container/main flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 md:gap-6">
+              <div className="flex min-h-0 flex-1 flex-col px-4 lg:px-6">
+                <ErrorBoundary>
+                  <Outlet />
+                </ErrorBoundary>
               </div>
             </div>
           </div>
         </SidebarInset>
       </SidebarProvider>
-      <GlobalSearch open={isOpen} onOpenChange={closeSearch} />
+      {isOpen ? (
+        <GlobalSearch open={isOpen} onOpenChange={closeSearch} />
+      ) : null}
+      {isTerminalOpen ? (
+        <ErrorBoundary fallback={null}>
+          <FloatingTerminal />
+        </ErrorBoundary>
+      ) : null}
+      <ErrorBoundary fallback={null}>
+        <AIChatbox />
+      </ErrorBoundary>
       <Toaster />
     </>
   )
 }
 
+function AppProviders({ children }: { children: ReactNode }) {
+  return (
+    <TerminalProvider>
+      <ClusterProvider>
+        <GlobalSearchProvider>
+          <AIChatProvider>{children}</AIChatProvider>
+        </GlobalSearchProvider>
+      </ClusterProvider>
+    </TerminalProvider>
+  )
+}
+
 function App() {
   return (
-    <ClusterProvider>
-      <GlobalSearchProvider>
-        <ClusterAwareApp />
-      </GlobalSearchProvider>
-    </ClusterProvider>
+    <AppProviders>
+      <ClusterGate>
+        <AppContent />
+      </ClusterGate>
+    </AppProviders>
+  )
+}
+
+export function StandaloneAIChatApp() {
+  return (
+    <AppProviders>
+      <ClusterGate>
+        <StandaloneAIChatbox />
+      </ClusterGate>
+    </AppProviders>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useAuth } from '@/contexts/auth-context'
 import {
   IconEdit,
   IconPlus,
@@ -30,6 +31,7 @@ import { RBACDialog } from './rbac-dialog'
 
 export function RBACManagement() {
   const { t } = useTranslation()
+  const { user } = useAuth()
   const queryClient = useQueryClient()
 
   const { data: roles = [], isLoading, error } = useRoleList()
@@ -39,20 +41,27 @@ export function RBACManagement() {
   const [deletingRole, setDeletingRole] = useState<Role | null>(null)
   const [showAssignDialog, setShowAssignDialog] = useState(false)
   const [assigningRole, setAssigningRole] = useState<Role | null>(null)
+  const [isAssigning, setIsAssigning] = useState(false)
+  const [isUnassigning, setIsUnassigning] = useState(false)
 
   const columns = useMemo<ColumnDef<Role>[]>(
     () => [
       {
         id: 'name',
-        header: t('common.name', 'Name'),
+        header: t('common.fields.name', 'Name'),
         cell: ({ row: { original: r } }) => (
-          <div>
-            <div className="flex items-center">
-              <span className="font-medium">{r.name}</span>{' '}
+          <div className="max-w-56">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate font-medium" title={r.name}>
+                {r.name}
+              </span>
               {r.isSystem && <Badge variant="secondary">System</Badge>}
             </div>
             {r.description && (
-              <div className="text-sm text-muted-foreground">
+              <div
+                className="truncate text-sm text-muted-foreground"
+                title={r.description}
+              >
                 {r.description}
               </div>
             )}
@@ -63,7 +72,10 @@ export function RBACManagement() {
         id: 'clusters',
         header: 'Clusters',
         cell: ({ row: { original: r } }) => (
-          <div className="text-sm text-muted-foreground">
+          <div
+            className="max-w-44 truncate text-sm text-muted-foreground"
+            title={r.clusters.join(', ')}
+          >
             {r.clusters.length > 0 ? (
               r.clusters.join(', ')
             ) : (
@@ -76,7 +88,10 @@ export function RBACManagement() {
         id: 'namespaces',
         header: 'Namespaces',
         cell: ({ row: { original: r } }) => (
-          <div className="text-sm text-muted-foreground">
+          <div
+            className="max-w-44 truncate text-sm text-muted-foreground"
+            title={r.namespaces.join(', ')}
+          >
             {r.namespaces.length > 0 ? (
               r.namespaces.join(', ')
             ) : (
@@ -90,7 +105,10 @@ export function RBACManagement() {
         id: 'Resources',
         header: 'Resources',
         cell: ({ row: { original: r } }) => (
-          <div className="text-sm text-muted-foreground">
+          <div
+            className="max-w-44 truncate text-sm text-muted-foreground"
+            title={r.resources.join(', ')}
+          >
             {r.resources.length > 0 ? (
               r.resources.join(', ')
             ) : (
@@ -103,7 +121,10 @@ export function RBACManagement() {
         id: 'verbs',
         header: 'Verbs',
         cell: ({ row: { original: r } }) => (
-          <div className="text-sm text-muted-foreground">
+          <div
+            className="max-w-44 truncate text-sm text-muted-foreground"
+            title={r.verbs.join(', ')}
+          >
             {r.verbs.length > 0 ? (
               r.verbs.join(', ')
             ) : (
@@ -122,9 +143,14 @@ export function RBACManagement() {
             r.assignments?.filter((a) => a.subjectType === 'group') || []
           const maxShow = 2
           return (
-            <div className="flex flex-wrap gap-1 text-xs max-w-[200px]">
+            <div className="flex max-w-56 flex-wrap gap-1 overflow-hidden text-xs">
               {users.slice(0, maxShow).map((a) => (
-                <Badge key={a.id} variant="secondary" className="text-xs">
+                <Badge
+                  key={a.id}
+                  variant="secondary"
+                  className="max-w-52 truncate text-xs"
+                  title={`user: ${a.subject}`}
+                >
                   user: {a.subject}
                 </Badge>
               ))}
@@ -134,7 +160,12 @@ export function RBACManagement() {
                 </Badge>
               )}
               {groups.slice(0, maxShow).map((a) => (
-                <Badge key={a.id} variant="secondary" className="text-xs">
+                <Badge
+                  key={a.id}
+                  variant="secondary"
+                  className="max-w-52 truncate text-xs"
+                  title={`group: ${a.subject}`}
+                >
                   group: {a.subject}
                 </Badge>
               ))}
@@ -160,7 +191,7 @@ export function RBACManagement() {
         label: (
           <>
             <IconShieldCheck className="h-4 w-4" />
-            {t('common.assign', 'Assign')}
+            {t('common.actions.assign', 'Assign')}
           </>
         ),
         onClick: (r) => {
@@ -172,7 +203,7 @@ export function RBACManagement() {
         label: (
           <>
             <IconEdit className="h-4 w-4" />
-            {t('common.edit', 'Edit')}
+            {t('common.actions.edit', 'Edit')}
           </>
         ),
         shouldDisable: (role) => !!role.isSystem,
@@ -185,7 +216,7 @@ export function RBACManagement() {
         label: (
           <div className="inline-flex items-center gap-2 text-destructive">
             <IconTrash className="h-4 w-4" />
-            {t('common.delete', 'Delete')}
+            {t('common.actions.delete', 'Delete')}
           </div>
         ),
         shouldDisable: (role) => !!role.isSystem,
@@ -201,12 +232,21 @@ export function RBACManagement() {
     mutationFn: (data: Partial<Role>) => createRole(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['role-list'] })
-      toast.success(t('rbac.messages.created', 'Role created'))
+      toast.success(
+        t('common.messages.created', {
+          resource: t('common.fields.role', 'Role'),
+          defaultValue: 'Role created',
+        })
+      )
       setShowDialog(false)
     },
     onError: (err: Error) =>
       toast.error(
-        err.message || t('rbac.messages.createError', 'Failed to create role')
+        err.message ||
+          t('common.messages.failedToCreate', {
+            resource: t('common.fields.role', 'role'),
+            defaultValue: 'Failed to create role',
+          })
       ),
   })
 
@@ -215,13 +255,22 @@ export function RBACManagement() {
       updateRole(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['role-list'] })
-      toast.success(t('rbac.messages.updated', 'Role updated'))
+      toast.success(
+        t('common.messages.updated', {
+          resource: t('common.fields.role', 'Role'),
+          defaultValue: 'Role updated',
+        })
+      )
       setShowDialog(false)
       setEditingRole(null)
     },
     onError: (err: Error) =>
       toast.error(
-        err.message || t('rbac.messages.updateError', 'Failed to update role')
+        err.message ||
+          t('common.messages.failedToUpdate', {
+            resource: t('common.fields.role', 'role'),
+            defaultValue: 'Failed to update role',
+          })
       ),
   })
 
@@ -229,16 +278,26 @@ export function RBACManagement() {
     mutationFn: (id: number) => deleteRole(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['role-list'] })
-      toast.success(t('rbac.messages.deleted', 'Role deleted'))
+      toast.success(
+        t('common.messages.deleted', {
+          resource: t('common.fields.role', 'Role'),
+          defaultValue: 'Role deleted',
+        })
+      )
       setDeletingRole(null)
     },
     onError: (err: Error) =>
       toast.error(
-        err.message || t('rbac.messages.deleteError', 'Failed to delete role')
+        err.message ||
+          t('common.messages.failedToDelete', {
+            resource: t('common.fields.role', 'role'),
+            defaultValue: 'Failed to delete role',
+          })
       ),
   })
 
   const handleSubmitRole = (data: Partial<Role>) => {
+    if (createMutation.isPending || updateMutation.isPending) return
     if (editingRole) {
       updateMutation.mutate({ id: editingRole.id, data })
     } else {
@@ -247,7 +306,7 @@ export function RBACManagement() {
   }
 
   const handleDeleteRole = () => {
-    if (!deletingRole) return
+    if (!deletingRole || deleteMutation.isPending) return
     deleteMutation.mutate(deletingRole.id)
   }
 
@@ -256,6 +315,8 @@ export function RBACManagement() {
     subjectType: 'user' | 'group',
     subject: string
   ) => {
+    if (isAssigning) return
+    setIsAssigning(true)
     try {
       await assignRole(roleId, { subjectType, subject })
       await queryClient.invalidateQueries({ queryKey: ['role-list'] })
@@ -269,12 +330,14 @@ export function RBACManagement() {
         }
       }
 
-      toast.success(t('rbac.messages.assigned', 'Assigned'))
+      toast.success(t('common.messages.assigned', 'Assigned'))
     } catch (err: unknown) {
       toast.error(
         (err as Error).message ||
-          t('rbac.messages.assignError', 'Failed to assign')
+          t('common.messages.failedToAssign', 'Failed to assign')
       )
+    } finally {
+      setIsAssigning(false)
     }
   }
 
@@ -283,6 +346,8 @@ export function RBACManagement() {
     subjectType: 'user' | 'group',
     subject: string
   ) => {
+    if (isUnassigning) return
+    setIsUnassigning(true)
     try {
       await unassignRole(roleId, subjectType, subject)
       await queryClient.invalidateQueries({ queryKey: ['role-list'] })
@@ -295,20 +360,32 @@ export function RBACManagement() {
         }
       }
 
-      toast.success(t('rbac.messages.unassigned', 'Unassigned'))
+      toast.success(t('common.messages.unassigned', 'Unassigned'))
     } catch (err: unknown) {
       toast.error(
         (err as Error).message ||
-          t('rbac.messages.unassignError', 'Failed to unassign')
+          t('common.messages.failedToUnassign', 'Failed to unassign')
       )
+    } finally {
+      setIsUnassigning(false)
     }
   }
+
+  const deleteRoleAdditionalNote = deletingRole?.assignments?.some(
+    (assignment) =>
+      assignment.subjectType === 'user' && assignment.subject === user?.username
+  )
+    ? t(
+        'rbac.deleteOwnRoleWarning',
+        'This role is assigned to your current user. Deleting it may affect your permissions.'
+      )
+    : undefined
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
         <div className="text-muted-foreground">
-          {t('common.loading', 'Loading...')}
+          {t('common.messages.loading', 'Loading...')}
         </div>
       </div>
     )
@@ -318,7 +395,10 @@ export function RBACManagement() {
     return (
       <div className="flex items-center justify-center py-8">
         <div className="text-destructive">
-          {t('rbac.errors.loadFailed', 'Failed to load roles')}
+          {t('common.messages.failedToLoad', {
+            resource: t('common.fields.roles', 'roles'),
+            defaultValue: 'Failed to load roles',
+          })}
         </div>
       </div>
     )
@@ -332,7 +412,7 @@ export function RBACManagement() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <IconShieldCheck className="h-5 w-5" />
-                {t('rbac.title', 'Role Management')}
+                {t('common.fields.roles', 'Role Management')}
               </CardTitle>
             </div>
             <Button
@@ -343,7 +423,7 @@ export function RBACManagement() {
               className="gap-2"
             >
               <IconPlus className="h-4 w-4" />
-              {t('rbac.actions.add', 'Add Role')}
+              {t('common.actions.add', 'Add')} {t('common.fields.role', 'Role')}
             </Button>
           </div>
         </CardHeader>
@@ -352,12 +432,17 @@ export function RBACManagement() {
           {roles.length === 0 && (
             <div className="text-center py-8 text-muted-foreground">
               <IconShieldCheck className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>{t('rbac.empty.title', 'No roles configured')}</p>
+              <p>
+                {t('common.messages.noItemsConfigured', {
+                  resource: t('common.fields.roles', 'roles'),
+                  defaultValue: 'No roles configured',
+                })}
+              </p>
               <p className="text-sm mt-1">
-                {t(
-                  'rbac.empty.description',
-                  'Create roles to grant permissions'
-                )}
+                {t('common.messages.createFirstItem', {
+                  resource: t('common.fields.role', 'role'),
+                  defaultValue: 'Create roles to grant permissions',
+                })}
               </p>
             </div>
           )}
@@ -372,6 +457,7 @@ export function RBACManagement() {
         }}
         role={editingRole}
         onSubmit={handleSubmitRole}
+        isSubmitting={createMutation.isPending || updateMutation.isPending}
       />
 
       <RBACAssignmentDialog
@@ -383,6 +469,8 @@ export function RBACManagement() {
         role={assigningRole}
         onAssign={handleAssign}
         onUnassign={handleUnassign}
+        isAssigning={isAssigning}
+        isUnassigning={isUnassigning}
       />
 
       <DeleteConfirmationDialog
@@ -391,6 +479,8 @@ export function RBACManagement() {
         onConfirm={handleDeleteRole}
         resourceName={deletingRole?.name || ''}
         resourceType="role"
+        isDeleting={deleteMutation.isPending}
+        additionalNote={deleteRoleAdditionalNote}
       />
     </div>
   )

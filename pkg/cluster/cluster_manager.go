@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/zxh326/kite/pkg/clusteragent"
 	"github.com/zxh326/kite/pkg/kube"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/prometheus"
@@ -29,13 +32,19 @@ type ClientSet struct {
 	DiscoveredPrometheusURL string
 	config                  string
 	prometheusURL           string
+	clusterAgentGeneration  uint64
 }
 
 type ClusterManager struct {
-	clusters       map[string]*ClientSet
-	errors         map[string]string
-	defaultContext string
+	mu                  sync.RWMutex
+	syncMu              sync.Mutex
+	clusters            map[string]*ClientSet
+	errors              map[string]string
+	defaultContext      string
+	clusterAgentManager *clusteragent.Manager
 }
+
+const clusterStartupSyncTimeout = 10 * time.Second
 
 func createClientSetInCluster(name, prometheusURL string) (*ClientSet, error) {
 	config, err := rest.InClusterConfig()
@@ -97,6 +106,12 @@ func newClientSet(name string, k8sConfig *rest.Config, prometheusURL string) (*C
 			} else {
 				klog.Infof("Using k8s API proxy for Prometheus in cluster %s", name)
 			}
+		} else if k8sConfig.Dial != nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.Proxy = nil
+			transport.DialContext = k8sConfig.Dial
+			rt = transport
+			klog.Infof("Using cluster agent TCP proxy for Prometheus in cluster %s", name)
 		}
 		cs.PromClient, err = prometheus.NewClientWithRoundTripper(prometheusURL, tracing.WrapTransport("prometheus", rt))
 		if err != nil {
@@ -143,6 +158,13 @@ func createK8sProxyTransport(k8sConfig *rest.Config, prometheusURL string) (*k8s
 		scheme:       parsedURL.Scheme,
 	}
 	transportWrapper.port = parsedURL.Port()
+	if transportWrapper.port == "" {
+		if parsedURL.Scheme == "https" {
+			transportWrapper.port = "443"
+		} else {
+			transportWrapper.port = "80"
+		}
+	}
 
 	return transportWrapper, nil
 }
@@ -164,24 +186,27 @@ func (t *k8sProxyTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	req.URL.Scheme = proxyURL.Scheme
 	req.URL.Host = proxyURL.Host
 
-	servicePath := fmt.Sprintf("/api/v1/namespaces/%s/services/%s:%s/proxy", t.namespace, t.svcName, t.port)
+	servicePath := fmt.Sprintf("/api/v1/namespaces/%s/services/%s:%s:%s/proxy", t.namespace, t.scheme, t.svcName, t.port)
 	req.URL.Path = servicePath + req.URL.Path
 
 	return t.transport.RoundTrip(req)
 }
 
 func (cm *ClusterManager) GetClientSet(clusterName string) (*ClientSet, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
 	if len(cm.clusters) == 0 {
 		return nil, fmt.Errorf("no clusters available")
 	}
 	if clusterName == "" {
-		if cm.defaultContext == "" {
+		clusterName = cm.defaultContext
+		if clusterName == "" {
 			// If no default context is set, return the first available cluster
 			for _, cs := range cm.clusters {
 				return cs, nil
 			}
 		}
-		return cm.GetClientSet(cm.defaultContext)
 	}
 	if cluster, ok := cm.clusters[clusterName]; ok {
 		return cluster, nil
@@ -189,7 +214,7 @@ func (cm *ClusterManager) GetClientSet(clusterName string) (*ClientSet, error) {
 	return nil, fmt.Errorf("cluster not found: %s", clusterName)
 }
 
-func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.Config) int64 {
+func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.Config, setDefault bool) int64 {
 	if len(kubeconfig.Contexts) == 0 {
 		return 0
 	}
@@ -214,9 +239,10 @@ func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.
 		cluster := model.Cluster{
 			Name:      contextName,
 			Config:    model.SecretString(configStr),
-			IsDefault: contextName == kubeconfig.CurrentContext,
+			IsDefault: setDefault && contextName == kubeconfig.CurrentContext,
 		}
-		if _, err := model.GetClusterByName(ctx, contextName); err != nil {
+		existingCluster, err := model.GetClusterByName(ctx, contextName)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				if err := model.AddCluster(ctx, &cluster); err != nil {
 					continue
@@ -226,6 +252,16 @@ func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.
 			}
 			continue
 		}
+		if existingCluster.ClusterAgent {
+			continue
+		}
+		if err := model.UpdateCluster(ctx, existingCluster, map[string]interface{}{
+			"config": model.SecretString(configStr),
+		}); err != nil {
+			continue
+		}
+		importedCount++
+		klog.Infof("Updated cluster config success: %s", contextName)
 	}
 	return int64(importedCount)
 }
@@ -234,7 +270,23 @@ var (
 	syncNow = make(chan struct{}, 1)
 )
 
-func syncClusters(cm *ClusterManager) error {
+func TriggerClusterSync() {
+	select {
+	case syncNow <- struct{}{}:
+	default:
+	}
+}
+
+func syncClusters(cm *ClusterManager, readyCh chan<- struct{}) error {
+	if readyCh != nil {
+		defer func() {
+			select {
+			case readyCh <- struct{}{}:
+			default:
+			}
+		}()
+	}
+
 	clusters, err := model.ListClusters(context.Background())
 	if err != nil {
 		klog.Warningf("list cluster err: %v", err)
@@ -242,31 +294,93 @@ func syncClusters(cm *ClusterManager) error {
 		return err
 	}
 	dbClusterMap := make(map[string]interface{})
+	type buildResult struct {
+		cluster   *model.Cluster
+		clientSet *ClientSet
+		err       error
+	}
+	buildQueue := make([]*model.Cluster, 0)
 	for _, cluster := range clusters {
 		dbClusterMap[cluster.Name] = cluster
 		if cluster.IsDefault {
+			cm.mu.Lock()
 			cm.defaultContext = cluster.Name
+			cm.mu.Unlock()
 		}
+		cm.mu.RLock()
 		current, currentExist := cm.clusters[cluster.Name]
-		if shouldUpdateCluster(current, cluster) {
+		cm.mu.RUnlock()
+		if cluster.ClusterAgent && !cluster.Enable {
+			cm.clusterAgentManager.Disconnect(cluster.ID)
+		}
+		if cluster.ClusterAgent && !cm.clusterAgentManager.Connected(cluster.ID) {
 			if currentExist {
+				cm.mu.Lock()
 				delete(cm.clusters, cluster.Name)
+				cm.mu.Unlock()
 				current.K8sClient.Stop(cluster.Name)
 			}
+			cm.mu.Lock()
 			if cluster.Enable {
-				clientSet, err := buildClientSet(cluster)
-				if err != nil {
-					klog.Errorf("Failed to build k8s client for cluster %s, in cluster: %t, err: %v", cluster.Name, cluster.InCluster, err)
-					cm.errors[cluster.Name] = err.Error()
-					continue
-				}
-				delete(cm.errors, cluster.Name)
-				cm.clusters[cluster.Name] = clientSet
+				cm.errors[cluster.Name] = "waiting for cluster agent connection"
 			} else {
 				delete(cm.errors, cluster.Name)
 			}
+			cm.mu.Unlock()
+			continue
+		}
+		clusterAgentConfigChanged := cluster.ClusterAgent && currentExist && current.clusterAgentGeneration != cm.clusterAgentManager.Generation(cluster.ID)
+		if clusterAgentConfigChanged {
+			klog.Infof("Cluster Agent transport configuration changed for cluster %s, updating", cluster.Name)
+		}
+		if clusterAgentConfigChanged || shouldUpdateCluster(current, cluster) {
+			if currentExist {
+				cm.mu.Lock()
+				delete(cm.clusters, cluster.Name)
+				cm.mu.Unlock()
+				current.K8sClient.Stop(cluster.Name)
+			}
+			if cluster.Enable {
+				buildQueue = append(buildQueue, cluster)
+			} else {
+				cm.mu.Lock()
+				delete(cm.errors, cluster.Name)
+				cm.mu.Unlock()
+			}
 		}
 	}
+	results := make(chan buildResult, len(buildQueue))
+	var wg sync.WaitGroup
+	for _, cluster := range buildQueue {
+		wg.Add(1)
+		go func(cluster *model.Cluster) {
+			defer wg.Done()
+			clientSet, err := cm.buildClientSet(cluster)
+			results <- buildResult{
+				cluster:   cluster,
+				clientSet: clientSet,
+				err:       err,
+			}
+		}(cluster)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	for result := range results {
+		if result.err != nil {
+			klog.Errorf("Failed to build k8s client for cluster %s, in cluster: %t, err: %v", result.cluster.Name, result.cluster.InCluster, result.err)
+			cm.mu.Lock()
+			cm.errors[result.cluster.Name] = result.err.Error()
+			cm.mu.Unlock()
+			continue
+		}
+		cm.mu.Lock()
+		delete(cm.errors, result.cluster.Name)
+		cm.clusters[result.cluster.Name] = result.clientSet
+		cm.mu.Unlock()
+	}
+	cm.mu.Lock()
 	for name, clientSet := range cm.clusters {
 		if _, ok := dbClusterMap[name]; !ok {
 			delete(cm.clusters, name)
@@ -278,6 +392,7 @@ func syncClusters(cm *ClusterManager) error {
 			delete(cm.errors, name)
 		}
 	}
+	cm.mu.Unlock()
 
 	return nil
 }
@@ -331,29 +446,83 @@ func buildClientSet(cluster *model.Cluster) (*ClientSet, error) {
 	return createClientSetFromConfig(cluster.Name, string(cluster.Config), cluster.PrometheusURL)
 }
 
+func (cm *ClusterManager) buildClientSet(cluster *model.Cluster) (*ClientSet, error) {
+	if !cluster.ClusterAgent {
+		return buildClientSet(cluster)
+	}
+	config, generation, err := cm.clusterAgentManager.RESTConfig(cluster.ID)
+	if err != nil {
+		return nil, err
+	}
+	clientSet, err := newClientSet(cluster.Name, config, cluster.PrometheusURL)
+	if err != nil {
+		return nil, err
+	}
+	clientSet.clusterAgentGeneration = generation
+	return clientSet, nil
+}
+
+func (cm *ClusterManager) syncClusters() error {
+	cm.syncMu.Lock()
+	defer cm.syncMu.Unlock()
+
+	return syncClusters(cm, nil)
+}
+
+func (cm *ClusterManager) syncClustersUntilReady(readyCh chan<- struct{}) error {
+	cm.syncMu.Lock()
+	defer cm.syncMu.Unlock()
+
+	return syncClusters(cm, readyCh)
+}
+
+func (cm *ClusterManager) snapshotState() (map[string]*ClientSet, map[string]string, string) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	clusters := make(map[string]*ClientSet, len(cm.clusters))
+	maps.Copy(clusters, cm.clusters)
+
+	errors := make(map[string]string, len(cm.errors))
+	maps.Copy(errors, cm.errors)
+
+	return clusters, errors, cm.defaultContext
+}
+
 func NewClusterManager() (*ClusterManager, error) {
 	cm := new(ClusterManager)
 	cm.clusters = make(map[string]*ClientSet)
 	cm.errors = make(map[string]string)
+	cm.clusterAgentManager = clusteragent.NewManager(TriggerClusterSync)
+
+	initialReady := make(chan struct{}, 1)
+	go func() {
+		if err := cm.syncClustersUntilReady(initialReady); err != nil {
+			klog.Warningf("Failed to sync clusters: %v", err)
+		}
+	}()
+
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if err := syncClusters(cm); err != nil {
-					klog.Warningf("Failed to sync clusters: %v", err)
-				}
 			case <-syncNow:
-				if err := syncClusters(cm); err != nil {
-					klog.Warningf("Failed to sync clusters: %v", err)
-				}
+			}
+			if err := cm.syncClusters(); err != nil {
+				klog.Warningf("Failed to sync clusters: %v", err)
 			}
 		}
 	}()
 
-	if err := syncClusters(cm); err != nil {
-		klog.Warningf("Failed to sync clusters: %v", err)
+	timer := time.NewTimer(clusterStartupSyncTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-initialReady:
+	case <-timer.C:
+		klog.Warningf("Timed out waiting for cluster readiness after %s, continuing startup", clusterStartupSyncTimeout)
 	}
 	return cm, nil
 }

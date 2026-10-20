@@ -3,15 +3,37 @@ package rbac
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zxh326/kite/pkg/common"
 	"github.com/zxh326/kite/pkg/model"
 )
+
+type roleReq struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Clusters    []string `json:"clusters"`
+	Namespaces  []string `json:"namespaces"`
+	Resources   []string `json:"resources"`
+	Verbs       []string `json:"verbs"`
+}
+
+func (req roleReq) toRole() model.Role {
+	return model.Role{
+		Name:        strings.TrimSpace(req.Name),
+		Description: req.Description,
+		Clusters:    model.SliceString(req.Clusters),
+		Namespaces:  model.SliceString(req.Namespaces),
+		Resources:   model.SliceString(req.Resources),
+		Verbs:       model.SliceString(req.Verbs),
+	}
+}
 
 // ListRoles returns all roles with assignments
 func ListRoles(c *gin.Context) {
 	var roles []model.Role
-	if err := model.DB.WithContext(c.Request.Context()).Preload("Assignments").Find(&roles).Error; err != nil {
+	if err := model.DB.Preload("Assignments").Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list roles: " + err.Error()})
 		return
 	}
@@ -27,7 +49,7 @@ func GetRole(c *gin.Context) {
 		return
 	}
 	var role model.Role
-	if err := model.DB.WithContext(c.Request.Context()).Preload("Assignments").First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.Preload("Assignments").First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
@@ -36,80 +58,105 @@ func GetRole(c *gin.Context) {
 
 // CreateRole creates a new role
 func CreateRole(c *gin.Context) {
-	var role model.Role
-	if err := c.ShouldBindJSON(&role); err != nil {
+	if common.IsSectionManaged("rbac") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
+	var req roleReq
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	role := req.toRole()
 	if role.Name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "role name is required"})
 		return
 	}
-	if err := model.DB.WithContext(c.Request.Context()).Create(&role).Error; err != nil {
+	if err := model.DB.Create(&role).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create role: " + err.Error()})
 		return
 	}
 	// refresh in-memory config
-	select {
-	case SyncNow <- struct{}{}:
-	default:
-	}
+	TriggerSync()
 	c.JSON(http.StatusCreated, gin.H{"role": role})
 }
 
 // UpdateRole updates an existing role
 func UpdateRole(c *gin.Context) {
+	if common.IsSectionManaged("rbac") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	id := c.Param("id")
 	dbID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role id"})
 		return
 	}
-	var req model.Role
+	var req roleReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	var role model.Role
-	if err := model.DB.WithContext(c.Request.Context()).First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
+	if role.IsSystem {
+		c.JSON(http.StatusForbidden, gin.H{"error": "system roles cannot be modified"})
+		return
+	}
+	roleData := req.toRole()
+	if roleData.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role name is required"})
+		return
+	}
 	// update fields
-	role.Name = req.Name
-	role.Description = req.Description
-	role.Clusters = req.Clusters
-	role.Namespaces = req.Namespaces
-	role.Resources = req.Resources
-	role.Verbs = req.Verbs
+	role.Name = roleData.Name
+	role.Description = roleData.Description
+	role.Clusters = roleData.Clusters
+	role.Namespaces = roleData.Namespaces
+	role.Resources = roleData.Resources
+	role.Verbs = roleData.Verbs
 
-	if err := model.DB.WithContext(c.Request.Context()).Save(&role).Error; err != nil {
+	if err := model.DB.Save(&role).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role: " + err.Error()})
 		return
 	}
-	select {
-	case SyncNow <- struct{}{}:
-	default:
-	}
+	TriggerSync()
 	c.JSON(http.StatusOK, gin.H{"role": role})
 }
 
 // DeleteRole deletes a role and its assignments
 func DeleteRole(c *gin.Context) {
+	if common.IsSectionManaged("rbac") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	id := c.Param("id")
 	dbID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role id"})
 		return
 	}
-	if err := model.DB.WithContext(c.Request.Context()).Delete(&model.Role{}, uint(dbID)).Error; err != nil {
+	var role model.Role
+	if err := model.DB.First(&role, uint(dbID)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+		return
+	}
+	if role.IsSystem {
+		c.JSON(http.StatusForbidden, gin.H{"error": "system roles cannot be deleted"})
+		return
+	}
+	if err := model.DB.Delete(&role).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete role: " + err.Error()})
 		return
 	}
-	select {
-	case SyncNow <- struct{}{}:
-	default:
-	}
+	TriggerSync()
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -121,6 +168,11 @@ type roleAssignmentReq struct {
 
 // AssignRole assigns a role to a user or group
 func AssignRole(c *gin.Context) {
+	if common.IsSectionManaged("rbac") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	id := c.Param("id")
 	dbID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
@@ -139,14 +191,14 @@ func AssignRole(c *gin.Context) {
 	}
 	// ensure role exists
 	var role model.Role
-	if err := model.DB.WithContext(c.Request.Context()).First(&role, uint(dbID)).Error; err != nil {
+	if err := model.DB.First(&role, uint(dbID)).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
 		return
 	}
 
 	// check exists
 	var existing model.RoleAssignment
-	if err := model.DB.WithContext(c.Request.Context()).Where("role_id = ? AND subject_type = ? AND subject = ?", role.ID, req.SubjectType, req.Subject).First(&existing).Error; err == nil {
+	if err := model.DB.Where("role_id = ? AND subject_type = ? AND subject = ?", role.ID, req.SubjectType, req.Subject).First(&existing).Error; err == nil {
 		c.JSON(http.StatusOK, gin.H{"assignment": existing})
 		return
 	}
@@ -156,19 +208,21 @@ func AssignRole(c *gin.Context) {
 		SubjectType: req.SubjectType,
 		Subject:     req.Subject,
 	}
-	if err := model.DB.WithContext(c.Request.Context()).Create(&assignment).Error; err != nil {
+	if err := model.DB.Create(&assignment).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create assignment: " + err.Error()})
 		return
 	}
-	select {
-	case SyncNow <- struct{}{}:
-	default:
-	}
+	TriggerSync()
 	c.JSON(http.StatusCreated, gin.H{"assignment": assignment})
 }
 
 // UnassignRole removes an assignment. Accepts query params subjectType and subject.
 func UnassignRole(c *gin.Context) {
+	if common.IsSectionManaged("rbac") {
+		c.JSON(http.StatusForbidden, gin.H{"error": common.ManagedSectionError})
+		return
+	}
+
 	id := c.Param("id")
 	dbID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
@@ -181,13 +235,10 @@ func UnassignRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "subjectType and subject query params are required"})
 		return
 	}
-	if err := model.DB.WithContext(c.Request.Context()).Where("role_id = ? AND subject_type = ? AND subject = ?", uint(dbID), subjectType, subject).Delete(&model.RoleAssignment{}).Error; err != nil {
+	if err := model.DB.Where("role_id = ? AND subject_type = ? AND subject = ?", uint(dbID), subjectType, subject).Delete(&model.RoleAssignment{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove assignment: " + err.Error()})
 		return
 	}
-	select {
-	case SyncNow <- struct{}{}:
-	default:
-	}
+	TriggerSync()
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

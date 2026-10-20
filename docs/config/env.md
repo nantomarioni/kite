@@ -2,9 +2,13 @@
 
 Kite supports several environment variables by default to change the default values of some configuration items.
 
-- **KITE_USERNAME**: Set the initial administrator username. Can be created through the initialization page
-- **KITE_PASSWORD**: Set the initial administrator password. Can be created through the initialization page
-- **KUBECONFIG**: Kubernetes configuration file path, default value is `~/.kube/config`. When kite has no configured clusters, it will discover and import clusters from this path by default. Can import clusters through the initialization page
+- **PLUGIN_DIR**: Directory for installed plugin files. Defaults to `data/plugins`, relative to Kite's working directory (`/app/data/plugins` in the official container image). The Helm Chart sets it to `/data/plugins` to share SQLite's volume. See [Plugin Storage](./chart-values#plugin-storage) for directory and persistence configuration.
+
+- **KITE_CONFIG_FILE**: Path to the configuration file. Available in Kite `v0.10.0` and later. When set, Kite loads cluster, OAuth, LDAP, RBAC, and super user settings from this file. See [Configuration File](/config/config-file) for details.
+- **PLUGIN_DEV_URL**: Development plugin manifest URL, for example `http://localhost:5174/plugin.json`. The browser loads it directly; it overrides an installed plugin with the same ID without changing installation records. Leave unset to use installed plugins only. Helm deployments can set it through `extraEnvs`. See [Plugin Debugging](/plugins/debugging) for details.
+- **KITE_USERNAME**: Legacy environment variable for the initial administrator username. It is only used for env-to-DB migration when `KITE_CONFIG_FILE` is not set.
+- **KITE_PASSWORD**: Legacy environment variable for the initial administrator password. It is only used for env-to-DB migration when `KITE_CONFIG_FILE` is not set.
+- **KUBECONFIG**: Legacy kubeconfig environment variable used to import clusters when `KITE_CONFIG_FILE` is not set.
 - **ANONYMOUS_USER_ENABLED**: Enable anonymous user access, default value is `false`. When enabled, all access will no longer require authentication and will have the highest permissions by default.
 
 - **JWT_SECRET**: Secret key used for signing and verifying JWT
@@ -12,7 +16,13 @@ Kite supports several environment variables by default to change the default val
 
 - **HOST**: Used for generating OAuth 2.0 authorization callback addresses, default will be obtained from request headers. If you find the result not as expected, you can manually configure this environment variable.
 
+- **TRUSTED_PROXIES**: Comma-separated list of reverse proxy, ingress, or load balancer IPs/CIDRs that Kite should trust when reading `X-Forwarded-For` / `X-Real-IP` to determine the client IP. By default, Kite trusts local/private network ranges (`127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, `fc00::/7`) so common ingress deployments can report real client IPs. Set a narrower value such as `TRUSTED_PROXIES=10.42.0.0/16,192.168.1.10` for production, or `TRUSTED_PROXIES=none` to ignore all client-supplied forwarding headers.
+
+- **KUBECTL_TERMINAL_IMAGE**: Docker image used for the kubectl terminal.
+
 - **NODE_TERMINAL_IMAGE**: Docker image used for generating Node Terminal Agent.
+
+- **CLUSTER_AGENT_IMAGE**: Docker image used when generating the Cluster Agent manifest for Cluster Agent clusters.
 
 - **ENABLE_ANALYTICS**: Enable data analytics functionality, default value is `false`. When enabled, Kite will collect limited data to help improve the product.
 

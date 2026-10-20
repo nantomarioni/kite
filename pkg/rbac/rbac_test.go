@@ -8,6 +8,11 @@ import (
 )
 
 func TestCanAccess(t *testing.T) {
+	originalConfig := RBACConfig
+	t.Cleanup(func() {
+		RBACConfig = originalConfig
+	})
+
 	// Define test roles
 	adminRole := common.Role{
 		Name:        "admin",
@@ -31,7 +36,7 @@ func TestCanAccess(t *testing.T) {
 		Name:        "developer",
 		Description: "Developer access to specific resources",
 		Clusters:    []string{"dev-cluster"},
-		Resources:   []string{"pod", "deployment"},
+		Resources:   []string{"pods", "deployments"},
 		Namespaces:  []string{"dev", "test"},
 		Verbs:       []string{"get", "create", "update", "delete"},
 	}
@@ -40,7 +45,7 @@ func TestCanAccess(t *testing.T) {
 		Name:        "developer-regexp",
 		Description: "Developer access to specific resources by regexp",
 		Clusters:    []string{"dev.*"},
-		Resources:   []string{"pod", "deployment"},
+		Resources:   []string{"pods", "deployments"},
 		Namespaces:  []string{"dev.*", "test.*"},
 		Verbs:       []string{"get", "create", "update", "delete"},
 	}
@@ -49,7 +54,7 @@ func TestCanAccess(t *testing.T) {
 		Name:        "prod-viewer",
 		Description: "Read-only access to production",
 		Clusters:    []string{"prod-cluster"},
-		Resources:   []string{"pod", "service"},
+		Resources:   []string{"pods", "services"},
 		Namespaces:  []string{"prod"},
 		Verbs:       []string{"get"},
 	}
@@ -84,7 +89,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "unprivileged-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "dev-cluster",
 			namespace:  "default",
@@ -112,7 +117,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "viewer-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "any-cluster",
 			namespace:  "any-namespace",
@@ -126,7 +131,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "viewer-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "create",
 			cluster:    "any-cluster",
 			namespace:  "any-namespace",
@@ -140,7 +145,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "dev-user",
 			oidcGroups: []string{},
-			resource:   "deployment",
+			resource:   "deployments",
 			verb:       "update",
 			cluster:    "dev-cluster",
 			namespace:  "dev",
@@ -154,7 +159,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "dev-user",
 			oidcGroups: []string{},
-			resource:   "deployment",
+			resource:   "deployments",
 			verb:       "update",
 			cluster:    "prod-cluster",
 			namespace:  "dev",
@@ -168,7 +173,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "dev-user",
 			oidcGroups: []string{},
-			resource:   "deployment",
+			resource:   "deployments",
 			verb:       "update",
 			cluster:    "dev-cluster",
 			namespace:  "dev",
@@ -182,7 +187,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "dev-user",
 			oidcGroups: []string{},
-			resource:   "deployment",
+			resource:   "deployments",
 			verb:       "update",
 			cluster:    "prod-cluster",
 			namespace:  "dev",
@@ -197,11 +202,40 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "multi-role-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "prod-cluster",
 			namespace:  "prod",
 			expected:   true,
+		},
+		{
+			name: "permission dimensions are not combined across roles",
+			roles: []common.Role{
+				{
+					Name:       "wrong-resource",
+					Clusters:   []string{"prod-cluster"},
+					Resources:  []string{"deployments"},
+					Namespaces: []string{"prod"},
+					Verbs:      []string{"get"},
+				},
+				{
+					Name:       "wrong-scope",
+					Clusters:   []string{"dev-cluster"},
+					Resources:  []string{"pods"},
+					Namespaces: []string{"dev"},
+					Verbs:      []string{"update"},
+				},
+			},
+			mappings: []common.RoleMapping{
+				{Name: "wrong-resource", Users: []string{"split-role-user"}},
+				{Name: "wrong-scope", Users: []string{"split-role-user"}},
+			},
+			user:      "split-role-user",
+			resource:  "pods",
+			verb:      "get",
+			cluster:   "prod-cluster",
+			namespace: "prod",
+			expected:  false,
 		},
 		{
 			name:  "user with OIDC group permissions",
@@ -211,7 +245,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "group-member",
 			oidcGroups: []string{"viewers-group"},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "any-cluster",
 			namespace:  "any-namespace",
@@ -225,7 +259,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "any-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "any-cluster",
 			namespace:  "any-namespace",
@@ -239,7 +273,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "any-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "any-cluster",
 			namespace:  "any-namespace",
@@ -253,7 +287,7 @@ func TestCanAccess(t *testing.T) {
 			},
 			user:       "any-user",
 			oidcGroups: []string{},
-			resource:   "pod",
+			resource:   "pods",
 			verb:       "get",
 			cluster:    "any-cluster",
 			namespace:  "kube-system",
@@ -271,6 +305,119 @@ func TestCanAccess(t *testing.T) {
 
 			if result != tc.expected {
 				t.Errorf("Expected CanAccess to return %v but got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+// TestHasResourcePermission covers the namespace-agnostic gate used by the
+// RBAC middleware to decide whether a cross-namespace LIST may pass through.
+// It must be true when the user holds any role granting the verb on the
+// resource in the cluster (namespace irrelevant), and false otherwise.
+func TestHasResourcePermission(t *testing.T) {
+	originalConfig := RBACConfig
+	t.Cleanup(func() {
+		RBACConfig = originalConfig
+	})
+
+	// Mirrors the issue #610 scenario: two namespace-scoped roles, each
+	// granting a single namespace. Neither role carries "_all" / "*".
+	facilitiesRole := common.Role{
+		Name: "facilities", Clusters: []string{"*"},
+		Resources: []string{"deployments"}, Namespaces: []string{"charon-facilities-qd"},
+		Verbs: []string{"get"},
+	}
+	sluiceRole := common.Role{
+		Name: "sluice", Clusters: []string{"*"},
+		Resources: []string{"deployments"}, Namespaces: []string{"charon-sluice"},
+		Verbs: []string{"get"},
+	}
+	// A role that grants create/update but not get on deployments.
+	writerRole := common.Role{
+		Name: "writer", Clusters: []string{"*"},
+		Resources: []string{"deployments"}, Namespaces: []string{"team-a"},
+		Verbs: []string{"create", "update"},
+	}
+
+	tests := []struct {
+		name     string
+		roles    []common.Role
+		mappings []common.RoleMapping
+		user     string
+		resource string
+		verb     string
+		cluster  string
+		expected bool
+	}{
+		{
+			name:  "issue #610: multi-namespace user has get permission on deployments",
+			roles: []common.Role{facilitiesRole, sluiceRole},
+			mappings: []common.RoleMapping{
+				{Name: "facilities", Users: []string{"xuke"}},
+				{Name: "sluice", Users: []string{"xuke"}},
+			},
+			user: "xuke", resource: "deployments", verb: "get", cluster: "any-cluster",
+			expected: true,
+		},
+		{
+			name:     "writer without get verb has no get permission",
+			roles:    []common.Role{writerRole},
+			mappings: []common.RoleMapping{{Name: "writer", Users: []string{"dev"}}},
+			user:     "dev", resource: "deployments", verb: "get", cluster: "any-cluster",
+			expected: false,
+		},
+		{
+			name:     "writer has update permission (namespace-agnostic)",
+			roles:    []common.Role{writerRole},
+			mappings: []common.RoleMapping{{Name: "writer", Users: []string{"dev"}}},
+			user:     "dev", resource: "deployments", verb: "update", cluster: "any-cluster",
+			expected: true,
+		},
+		{
+			name:     "wrong resource: no permission",
+			roles:    []common.Role{facilitiesRole},
+			mappings: []common.RoleMapping{{Name: "facilities", Users: []string{"xuke"}}},
+			user:     "xuke", resource: "pods", verb: "get", cluster: "any-cluster",
+			expected: false,
+		},
+		{
+			name:     "wrong cluster: no permission",
+			roles:    []common.Role{{Name: "prod-reader", Clusters: []string{"prod"}, Resources: []string{"deployments"}, Verbs: []string{"get"}}},
+			mappings: []common.RoleMapping{{Name: "prod-reader", Users: []string{"dev"}}},
+			user:     "dev", resource: "deployments", verb: "get", cluster: "dev",
+			expected: false,
+		},
+		{
+			name: "permission dimensions are not combined across roles",
+			roles: []common.Role{
+				{Name: "prod-deployment-reader", Clusters: []string{"prod"}, Resources: []string{"deployments"}, Verbs: []string{"get"}},
+				{Name: "dev-pod-reader", Clusters: []string{"dev"}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+			},
+			mappings: []common.RoleMapping{
+				{Name: "prod-deployment-reader", Users: []string{"dev"}},
+				{Name: "dev-pod-reader", Users: []string{"dev"}},
+			},
+			user: "dev", resource: "pods", verb: "get", cluster: "prod",
+			expected: false,
+		},
+		{
+			name:     "no roles at all",
+			roles:    []common.Role{facilitiesRole},
+			mappings: []common.RoleMapping{{Name: "facilities", Users: []string{"xuke"}}},
+			user:     "stranger", resource: "deployments", verb: "get", cluster: "any-cluster",
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			RBACConfig = &common.RolesConfig{
+				Roles:       tc.roles,
+				RoleMapping: tc.mappings,
+			}
+			got := HasResourcePermission(model.User{Username: tc.user}, tc.resource, tc.verb, tc.cluster)
+			if got != tc.expected {
+				t.Errorf("HasResourcePermission = %v, want %v", got, tc.expected)
 			}
 		})
 	}

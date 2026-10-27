@@ -144,6 +144,19 @@ func (h *AuthHandler) bootstrapUser(c *gin.Context, setting *model.GeneralSettin
 		return &currentUser
 	}
 
+	// Auth Proxy: the UI decides "logged in" from bootstrap, so resolve the
+	// user from the proxy headers here too (same as RequireAuth).
+	if common.AuthProxyEnabled {
+		user, err := h.handleAuthProxyLogin(c)
+		if err != nil || user == nil {
+			return nil
+		}
+		currentUser := *user
+		currentUser.Roles = rbac.GetUserRoles(currentUser)
+		applyBootstrapSidebarPreference(&currentUser, setting)
+		return &currentUser
+	}
+
 	tokenString, _ := c.Cookie("auth_token")
 	if tokenString == "" {
 		return nil

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -396,6 +397,61 @@ func NewAPIKeyUser(name string) (*User, error) {
 func ListAPIKeyUsers() (users []User, err error) {
 	err = DB.Order("id desc").Where("provider = ?", common.APIKeyProvider).Find(&users).Error
 	return users, err
+}
+
+// FindOrCreateAuthProxyUser finds or creates a user from auth proxy headers.
+// Uses uid (stored in Sub field) as the unique identifier.
+// authProxyLoginRefresh is how often an unchanged auth proxy user's
+// LastLoginAt is persisted.
+const authProxyLoginRefresh = 5 * time.Minute
+
+func FindOrCreateAuthProxyUser(uid, username, name, email string, groups []string) (*User, error) {
+	if uid == "" {
+		return nil, errors.New("auth proxy uid is empty")
+	}
+
+	var existingUser User
+	now := time.Now()
+
+	if err := DB.Where("sub = ?", uid).First(&existingUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Create new user
+			newUser := &User{
+				Username:    username,
+				Name:        name,
+				Sub:         uid,
+				Provider:    common.AuthProxyProvider,
+				OIDCGroups:  groups,
+				Enabled:     true,
+				LastLoginAt: &now,
+			}
+			if err := DB.Create(newUser).Error; err != nil {
+				return nil, err
+			}
+			return newUser, nil
+		}
+		return nil, err
+	}
+
+	// Skip the write when nothing changed and the login is recent: this runs
+	// on every proxied request, and each write is slow on SQLite over NFS.
+	if existingUser.Username == username && existingUser.Name == name &&
+		slices.Equal(existingUser.OIDCGroups, groups) &&
+		existingUser.LastLoginAt != nil && now.Sub(*existingUser.LastLoginAt) < authProxyLoginRefresh {
+		return &existingUser, nil
+	}
+
+	// Update existing user with latest info
+	existingUser.Username = username
+	existingUser.Name = name
+	existingUser.OIDCGroups = groups
+	existingUser.LastLoginAt = &now
+	if err := DB.Save(&existingUser).Error; err != nil {
+		return nil, err
+	}
+	InvalidateUserCache(uint64(existingUser.ID))
+
+	return &existingUser, nil
 }
 
 var (

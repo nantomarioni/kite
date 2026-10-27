@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -200,7 +201,7 @@ func applyConfig(path string, cfg *KiteConfig) AppliedSections {
 }
 
 func applySuperUser(cfg *SuperUserConfig) error {
-	existing, err := model.GetUserByUsername(cfg.Username)
+	existing, err := model.GetUserByUsername(context.Background(), cfg.Username)
 	if err == nil {
 		// User exists — update password and ensure admin role
 		hash, err := utils.HashPassword(cfg.Password)
@@ -223,7 +224,7 @@ func applySuperUser(cfg *SuperUserConfig) error {
 		Username: cfg.Username,
 		Password: cfg.Password,
 	}
-	if err := model.AddSuperUser(u); err != nil {
+	if err := model.AddSuperUser(context.Background(), u); err != nil {
 		return err
 	}
 	rbac.TriggerSync()
@@ -232,7 +233,7 @@ func applySuperUser(cfg *SuperUserConfig) error {
 
 // ensureAdminRole ensures the user has an admin role assignment (idempotent).
 func ensureAdminRole(username string) error {
-	adminRole, err := model.GetRoleByName("admin")
+	adminRole, err := model.GetRoleByName(context.Background(), "admin")
 	if err != nil {
 		return err
 	}

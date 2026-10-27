@@ -73,7 +73,7 @@ func NewToken() (string, string, error) {
 }
 
 func (m *Manager) RegistrationPublicKey(token string) (string, error) {
-	cluster, err := resolveToken(token)
+	cluster, err := resolveToken(context.Background(), token)
 	if err != nil {
 		return "", err
 	}
@@ -96,11 +96,11 @@ func validToken(token string) bool {
 	return err == nil && len(decoded) == clusterAgentTokenSize
 }
 
-func resolveToken(token string) (*model.Cluster, error) {
+func resolveToken(ctx context.Context, token string) (*model.Cluster, error) {
 	if !validToken(token) {
 		return nil, nil
 	}
-	cluster, err := model.GetClusterByClusterAgentTokenHash(tokenHash(token))
+	cluster, err := model.GetClusterByClusterAgentTokenHash(ctx, tokenHash(token))
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -172,7 +172,7 @@ func (m *Manager) ResolveManifestGrant(grant string) (string, error) {
 	if time.Now().Unix() >= stored.ExpiresAt {
 		return "", ErrInvalidManifestGrant
 	}
-	cluster, err := resolveToken(stored.ClusterAgentToken)
+	cluster, err := resolveToken(context.Background(), stored.ClusterAgentToken)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +219,7 @@ func authenticateClusterAgent(req *http.Request) (*model.Cluster, error) {
 	if !found || token == "" {
 		return nil, nil
 	}
-	cluster, err := resolveToken(token)
+	cluster, err := resolveToken(req.Context(), token)
 	if err != nil {
 		return nil, err
 	}

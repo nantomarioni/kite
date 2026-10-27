@@ -66,7 +66,7 @@ func TestAPIKeyLifecycleControlsAuthentication(t *testing.T) {
 	authRecorder := httptest.NewRecorder()
 	authContext, _ := gin.CreateTestContext(authRecorder)
 	authContext.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-	authHandler.RequireAPIKeyAuth(authContext, strings.TrimPrefix(fullKey, "kite"))
+	authHandler.RequireAPIKeyAuth(authContext, authContext, strings.TrimPrefix(fullKey, "kite"))
 	if authContext.IsAborted() {
 		t.Fatalf("created API key was rejected: %s", authRecorder.Body.String())
 	}
@@ -83,7 +83,7 @@ func TestAPIKeyLifecycleControlsAuthentication(t *testing.T) {
 	rejectedRecorder := httptest.NewRecorder()
 	rejectedContext, _ := gin.CreateTestContext(rejectedRecorder)
 	rejectedContext.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-	authHandler.RequireAPIKeyAuth(rejectedContext, strings.TrimPrefix(fullKey, "kite"))
+	authHandler.RequireAPIKeyAuth(rejectedContext, rejectedContext, strings.TrimPrefix(fullKey, "kite"))
 	if !rejectedContext.IsAborted() || rejectedRecorder.Code != http.StatusUnauthorized {
 		t.Fatalf("deleted API key authentication status = %d, aborted=%v", rejectedRecorder.Code, rejectedContext.IsAborted())
 	}

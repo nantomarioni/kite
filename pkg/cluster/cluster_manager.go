@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,6 +15,7 @@ import (
 	"github.com/zxh326/kite/pkg/kube"
 	"github.com/zxh326/kite/pkg/model"
 	"github.com/zxh326/kite/pkg/prometheus"
+	"github.com/zxh326/kite/pkg/tracing"
 	"gorm.io/gorm"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -73,6 +75,14 @@ func newClientSet(name string, k8sConfig *rest.Config, prometheusURL string) (*C
 		Name:          name,
 		prometheusURL: prometheusURL,
 	}
+	if tracing.Enabled() {
+		// Every client-go / controller-runtime request (incl. the Prometheus
+		// apiserver-proxy transport below) goes through this wrapper.
+		k8sConfig = rest.CopyConfig(k8sConfig)
+		k8sConfig.Wrap(func(rt http.RoundTripper) http.RoundTripper {
+			return tracing.WrapTransport("kubernetes", rt)
+		})
+	}
 	var err error
 	cs.K8sClient, err = kube.NewClient(k8sConfig)
 	if err != nil {
@@ -103,7 +113,7 @@ func newClientSet(name string, k8sConfig *rest.Config, prometheusURL string) (*C
 			rt = transport
 			klog.Infof("Using cluster agent TCP proxy for Prometheus in cluster %s", name)
 		}
-		cs.PromClient, err = prometheus.NewClientWithRoundTripper(prometheusURL, rt)
+		cs.PromClient, err = prometheus.NewClientWithRoundTripper(prometheusURL, tracing.WrapTransport("prometheus", rt))
 		if err != nil {
 			klog.Warningf("Failed to create Prometheus client for cluster %s, some features may not work as expected, err: %v", name, err)
 		}
@@ -204,7 +214,7 @@ func (cm *ClusterManager) GetClientSet(clusterName string) (*ClientSet, error) {
 	return nil, fmt.Errorf("cluster not found: %s", clusterName)
 }
 
-func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bool) int64 {
+func ImportClustersFromKubeconfig(ctx context.Context, kubeconfig *clientcmdapi.Config, setDefault bool) int64 {
 	if len(kubeconfig.Contexts) == 0 {
 		return 0
 	}
@@ -231,10 +241,10 @@ func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bo
 			Config:    model.SecretString(configStr),
 			IsDefault: setDefault && contextName == kubeconfig.CurrentContext,
 		}
-		existingCluster, err := model.GetClusterByName(contextName)
+		existingCluster, err := model.GetClusterByName(ctx, contextName)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := model.AddCluster(&cluster); err != nil {
+				if err := model.AddCluster(ctx, &cluster); err != nil {
 					continue
 				}
 				importedCount++
@@ -245,7 +255,7 @@ func ImportClustersFromKubeconfig(kubeconfig *clientcmdapi.Config, setDefault bo
 		if existingCluster.ClusterAgent {
 			continue
 		}
-		if err := model.UpdateCluster(existingCluster, map[string]interface{}{
+		if err := model.UpdateCluster(ctx, existingCluster, map[string]interface{}{
 			"config": model.SecretString(configStr),
 		}); err != nil {
 			continue
@@ -277,7 +287,7 @@ func syncClusters(cm *ClusterManager, readyCh chan<- struct{}) error {
 		}()
 	}
 
-	clusters, err := model.ListClusters()
+	clusters, err := model.ListClusters(context.Background())
 	if err != nil {
 		klog.Warningf("list cluster err: %v", err)
 		time.Sleep(5 * time.Second)

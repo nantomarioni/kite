@@ -14,6 +14,7 @@ import (
 
 	"github.com/zxh326/kite/pkg/clusteragent"
 	"github.com/zxh326/kite/pkg/common"
+	"github.com/zxh326/kite/pkg/tracing"
 	"github.com/zxh326/kite/pkg/version"
 	"k8s.io/klog/v2"
 )
@@ -33,6 +34,13 @@ func main() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
+
+	// Tracing reads the standard OTEL_* env itself; off unless an endpoint is set.
+	// Must run before cluster.NewClusterManager() so k8s transports get wrapped.
+	shutdownTracing, err := tracing.Init(context.Background())
+	if err != nil {
+		klog.Warningf("Failed to initialize tracing, continuing without it: %v", err)
+	}
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 
@@ -66,7 +74,15 @@ func main() {
 	cancelApp()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		klog.Fatalf("Failed to shutdown server: %v", err)
+	shutdownErr := srv.Shutdown(ctx)
+
+	tracingCtx, tracingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer tracingCancel()
+	if err := shutdownTracing(tracingCtx); err != nil {
+		klog.Warningf("Failed to flush traces: %v", err)
+	}
+
+	if shutdownErr != nil {
+		klog.Fatalf("Failed to shutdown server: %v", shutdownErr)
 	}
 }

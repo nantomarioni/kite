@@ -15,6 +15,7 @@ import (
 	"github.com/zxh326/kite/pkg/scheduler"
 	"github.com/zxh326/kite/pkg/telemetry"
 	"github.com/zxh326/kite/pkg/templates"
+	"github.com/zxh326/kite/pkg/tracing"
 	"k8s.io/klog/v2"
 )
 
@@ -27,6 +28,9 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 	}
 
 	model.InitDB()
+	if err := tracing.InstrumentDB(model.DB); err != nil {
+		klog.Warningf("Failed to instrument database for tracing: %v", err)
+	}
 	if _, err := model.GetGeneralSetting(); err != nil {
 		klog.Warningf("Failed to load general setting: %v", err)
 	}
@@ -53,8 +57,14 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 
 func buildEngine(cm *cluster.ClusterManager) *gin.Engine {
 	r := gin.New()
+	// Let handlers pass c as a context.Context: it then carries the request's
+	// cancellation and (when tracing) its span.
+	r.ContextWithFallback = true
 	middleware.ConfigureRawPathRouting(r)
 	configureTrustedProxies(r)
+	if tracing.Enabled() {
+		r.Use(tracing.Middleware()...)
+	}
 	r.Use(middleware.Metrics())
 	if !common.DisableGZIP {
 		klog.Info("GZIP compression is enabled")

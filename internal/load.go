@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -20,14 +21,14 @@ var (
 
 func loadUser() error {
 	if kiteUsername != "" && kitePassword != "" {
-		uc, err := model.CountUsers()
+		uc, err := model.CountUsers(context.Background())
 		if err == nil && uc == 0 {
 			klog.Infof("Creating super user %s from environment variables", kiteUsername)
 			u := &model.User{
 				Username: kiteUsername,
 				Password: kitePassword,
 			}
-			err := model.AddSuperUser(u)
+			err := model.AddSuperUser(context.Background(), u)
 			if err == nil {
 				rbac.SyncNow <- struct{}{}
 			} else {
@@ -40,7 +41,7 @@ func loadUser() error {
 }
 
 func loadClusters() error {
-	cc, err := model.CountClusters()
+	cc, err := model.CountClusters(context.Background())
 	if err != nil || cc > 0 {
 		return err
 	}
@@ -64,7 +65,7 @@ func loadClusters() error {
 	}
 
 	klog.Infof("Importing clusters from kubeconfig: %s", kubeconfigpath)
-	cluster.ImportClustersFromKubeconfig(kubeconfig, true)
+	cluster.ImportClustersFromKubeconfig(context.Background(), kubeconfig, true)
 	return nil
 }
 

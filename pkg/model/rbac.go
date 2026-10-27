@@ -1,5 +1,7 @@
 package model
 
+import "context"
+
 type Role struct {
 	Model
 
@@ -54,16 +56,16 @@ var (
 	}
 )
 
-func GetRoleByName(name string) (*Role, error) {
+func GetRoleByName(ctx context.Context, name string) (*Role, error) {
 	var role Role
-	if err := DB.Where("name = ?", name).First(&role).Error; err != nil {
+	if err := DB.WithContext(ctx).Where("name = ?", name).First(&role).Error; err != nil {
 		return nil, err
 	}
 	return &role, nil
 }
 
-func AddRoleAssignment(roleName string, subjectType, subject string) error {
-	role, err := GetRoleByName(roleName)
+func AddRoleAssignment(ctx context.Context, roleName string, subjectType, subject string) error {
+	role, err := GetRoleByName(ctx, roleName)
 	if err != nil {
 		return err
 	}
@@ -72,16 +74,16 @@ func AddRoleAssignment(roleName string, subjectType, subject string) error {
 		SubjectType: subjectType,
 		Subject:     subject,
 	}
-	return DB.Create(&assignment).Error
+	return DB.WithContext(ctx).Create(&assignment).Error
 }
 
-func InitDefaultRole() error {
+func InitDefaultRole(ctx context.Context) error {
 	var err error
 	// Create default roles if they don't exist
-	if err = DB.Where("name = ?", DefaultAdminRole.Name).FirstOrCreate(&DefaultAdminRole).Error; err != nil {
+	if err = DB.WithContext(ctx).Where("name = ?", DefaultAdminRole.Name).FirstOrCreate(&DefaultAdminRole).Error; err != nil {
 		return err
 	}
-	if err = DB.Where("name = ?", DefaultViewerRole.Name).FirstOrCreate(&DefaultViewerRole).Error; err != nil {
+	if err = DB.WithContext(ctx).Where("name = ?", DefaultViewerRole.Name).FirstOrCreate(&DefaultViewerRole).Error; err != nil {
 		return err
 	}
 	return nil

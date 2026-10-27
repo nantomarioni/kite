@@ -1,6 +1,7 @@
 package apikeys
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -15,7 +16,7 @@ type CreateAPIKeyRequest struct {
 }
 
 func ListAPIKeys(c *gin.Context) {
-	apiKeys, err := model.ListAPIKeyUsers()
+	apiKeys, err := model.ListAPIKeyUsers(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list API keys"})
 		return
@@ -34,7 +35,7 @@ func CreateAPIKey(c *gin.Context) {
 		return
 	}
 
-	apiKey, err := model.NewAPIKeyUser(req.Name)
+	apiKey, err := model.NewAPIKeyUser(context.WithoutCancel(c.Request.Context()), req.Name)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create API key: %v", err)})
 		return
@@ -50,7 +51,7 @@ func DeleteAPIKey(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteUserByID(uint(id)); err != nil {
+	if err := model.DeleteUserByID(context.WithoutCancel(c.Request.Context()), uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete API key"})
 		return
 	}

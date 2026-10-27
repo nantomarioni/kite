@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 
 	"github.com/zxh326/kite/pkg/model"
@@ -11,7 +12,7 @@ type AuthHandler struct {
 	ldap    *LDAPAuthenticator
 }
 
-type credentialAuthenticator func(username, password string) (*model.User, error)
+type credentialAuthenticator func(ctx context.Context, username, password string) (*model.User, error)
 
 var errInvalidCredentials = errors.New("invalid credentials")
 

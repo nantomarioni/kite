@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/zxh326/kite/pkg/tracing"
 	"github.com/zxh326/kite/pkg/version"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -177,6 +178,7 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 			cancel()
 			return nil, fmt.Errorf("failed to create client: %w", err)
 		}
+		c = tracing.WrapClient(c, false)
 	} else {
 		mgr, err := manager.New(config, manager.Options{
 			Scheme:         runtimeScheme,
@@ -218,7 +220,7 @@ func NewClient(config *rest.Config) (*K8sClient, error) {
 				"the cluster may be too large or the API server too slow. "+
 				"Consider increasing KITE_CACHE_SYNC_TIMEOUT or setting DISABLE_CACHE=true", cacheSyncTimeout())
 		}
-		c = mgr.GetClient()
+		c = tracing.WrapClient(mgr.GetClient(), true)
 	}
 
 	return &K8sClient{

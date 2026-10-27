@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,7 +30,7 @@ func TestClusterConfigurationLifecyclePreservesSecretsAndDefault(t *testing.T) {
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d: %s", create.Code, http.StatusCreated, create.Body.String())
 	}
-	primary, err := model.GetClusterByName("primary")
+	primary, err := model.GetClusterByName(context.Background(), "primary")
 	if err != nil {
 		t.Fatalf("loading created cluster: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestClusterConfigurationLifecyclePreservesSecretsAndDefault(t *testing.T) {
 	if update.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d: %s", update.Code, http.StatusOK, update.Body.String())
 	}
-	updated, err := model.GetClusterByID(primary.ID)
+	updated, err := model.GetClusterByID(context.Background(), primary.ID)
 	if err != nil {
 		t.Fatalf("loading updated cluster: %v", err)
 	}
@@ -77,14 +78,14 @@ func TestClusterConfigurationLifecyclePreservesSecretsAndDefault(t *testing.T) {
 	}
 
 	secondary := &model.Cluster{Name: "secondary", Config: "secondary-config", Enable: true}
-	if err := model.AddCluster(secondary); err != nil {
+	if err := model.AddCluster(context.Background(), secondary); err != nil {
 		t.Fatalf("creating secondary cluster: %v", err)
 	}
 	deleteSecondary := performClusterRequest(router, http.MethodDelete, fmt.Sprintf("/clusters/%d", secondary.ID), "")
 	if deleteSecondary.Code != http.StatusOK {
 		t.Fatalf("secondary delete status = %d, want %d: %s", deleteSecondary.Code, http.StatusOK, deleteSecondary.Body.String())
 	}
-	if _, err := model.GetClusterByID(secondary.ID); err == nil {
+	if _, err := model.GetClusterByID(context.Background(), secondary.ID); err == nil {
 		t.Fatal("deleted secondary cluster still exists")
 	}
 }

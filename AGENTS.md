@@ -27,12 +27,11 @@ response shapes.
 Fork of upstream `kite-org/kite` (ex-`zxh326/kite`; origin `nantomarioni/kite`). **`main`** tracks
 upstream; **`fork`** = `main` + local commits and is what deploys. The Go module
 path stays `github.com/zxh326/kite` — don't rename it. Local additions (the
-canonical "how we add features" examples): VPA views, per-container resource
-usage, pod termination reason / resource config, app-view, **auth-proxy**
-support, **OpenTelemetry tracing**, the homelab CI/CD workflow. Most fork work
-is in `ui/`; backend touch points are `pkg/auth/middleware.go` (auth-proxy +
-the `auth.authenticate` span), `pkg/common/common.go`, `pkg/model/user.go`,
-`pkg/appview/` (+ one line in `routes.go`), plus tracing: `pkg/tracing/`, its
+canonical "how we add features" examples): VPA views, **auth-proxy**
+support, **OpenTelemetry tracing**, the homelab CI/CD workflow — one commit
+per feature on top of upstream. The UI work is in `ui/`; backend touch points
+are `pkg/auth/middleware.go` (auth-proxy + the `auth.authenticate` span),
+`pkg/common/common.go`, `pkg/model/user.go`, plus tracing: `pkg/tracing/`, its
 `main.go`/`app.go` wiring, one-line hooks in `pkg/cluster/cluster_manager.go`,
 `pkg/kube/client.go`, `pkg/prometheus/client.go` and both Describe handlers,
 and `ctx` plumbing through the user/cluster/oauth/rbac `pkg/model` funcs +
@@ -168,8 +167,8 @@ Check the other side before declaring done. Siblings are `../<repo>` checkouts
   assumes Authentik group names.
 - **Upstream `kite-org/kite`** (remote `upstream`) — fork-only backend code
   stays isolated to `pkg/auth/middleware.go`, `pkg/common/common.go`,
-  `pkg/model/user.go`, `pkg/appview/` and `pkg/tracing/` (+ one-line hooks in
-  `main.go`/`app.go`, `routes.go`, `cluster_manager.go`,
+  `pkg/model/user.go` and `pkg/tracing/` (+ one-line hooks in
+  `main.go`/`app.go`, `cluster_manager.go`,
   `pkg/kube/client.go`, `pkg/prometheus/client.go`, the Describe handlers); the
   `ctx`-first `pkg/model` signatures touch many upstream callers. Most fork
   features are frontend-only on the generic API.

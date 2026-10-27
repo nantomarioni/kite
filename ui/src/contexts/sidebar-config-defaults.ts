@@ -65,12 +65,6 @@ resourceCatalog
     })
   })
 
-defaultMenus['sidebar.groups.workloads'].unshift({
-  titleKey: 'nav.appView',
-  url: '/app-view',
-  icon: getResourceIconComponent('IconLayoutDashboard'),
-})
-
 defaultMenus['sidebar.groups.application'].push({
   titleKey: 'nav.helmCharts',
   url: '/charts',

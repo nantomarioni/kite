@@ -25,13 +25,13 @@ Gate: **typecheck + `lint` + `test` clean** and `vite build` succeeds (root
 ui/src/
 ├── main.tsx App.tsx routes.tsx     # bootstrap, shell, router (react-router-dom)
 ├── pages/                          # one file per route (overview, resource-list, resource-detail, settings, vpa-*, …)
-├── components/                     # feature components + components/ui/ (shadcn primitives), chart/, editors/, AppView/
+├── components/                     # feature components + components/ui/ (shadcn primitives), chart/, editors/
 ├── lib/
 │   ├── api.ts + api/*.ts           # ALL data hooks/fns (useResources, useResource, mutations, SSE/WS streams)
 │   ├── resource-catalog.ts         # every resource type: labels, icon, sidebar group → sidebar/routes/search
 │   ├── api-client.ts               # fetch wrapper w/ auth refresh + cluster header (apiClient)
 │   ├── subpath.ts                  # KITE_BASE / dynamic-base handling (withSubPath, getWebSocketUrl)
-│   ├── appview-api.ts useWebSocket.ts k8s.ts utils.ts favorites.ts query-provider.tsx
+│   ├── useWebSocket.ts k8s.ts utils.ts favorites.ts query-provider.tsx
 ├── types/                          # api.ts (ResourceType maps), k8s.ts, vpa.ts, gateway.ts, sidebar.ts, themes.ts
 ├── contexts/                       # auth-context, cluster-context, sidebar-config-context
 ├── hooks/                          # use-cluster, use-favorites, use-mobile, use-page-title, use-query, …
@@ -70,14 +70,13 @@ auth cookie, 401 refresh, `x-cluster-name`) as TanStack Query hooks. Never
    (sidebar + `/:resource` routing) and, for custom pages, a case in
    `pages/resource-definitions.tsx`; detail pages use `ResourceDetailShell` +
    `ResourceOverview`. Non-resource pages go in `routes.tsx` (lazy-load heavy
-   ones, see `AppView`) and `contexts/sidebar-config-defaults.ts`.
+   ones) and `contexts/sidebar-config-defaults.ts`.
 4. **i18n** — add keys to **both** `i18n/locales/en.json` and `zh.json` (keep the
    trees parallel).
 
 **CRD views need no backend change** (generic CRD API). Fork examples: VPA
 (`types/vpa.ts`, `pages/vpa-list-page.tsx` + `vpa-detail.tsx`,
-`components/vpa-*.tsx`); per-container usage + last restart reason (`components/container-resource-usage.tsx`,
-a child of upstream's `ContainerInfoCard`) on the pod and workload detail pages.
+`components/vpa-*.tsx`).
 
 ## Conventions
 

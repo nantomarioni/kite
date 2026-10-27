@@ -9,7 +9,6 @@ import {
   IconDatabase,
   IconFileDatabase,
   IconKey,
-  IconLayoutDashboard,
   IconLoadBalancer,
   IconLock,
   IconMap,
@@ -39,7 +38,6 @@ type SidebarGroupKey =
 
 export const resourceIconMap = {
   IconArrowsUpDown,
-  IconLayoutDashboard,
   IconBox,
   IconRocket,
   IconStack2,

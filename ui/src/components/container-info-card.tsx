@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import {
   Container,
   ContainerState,
@@ -78,7 +78,6 @@ export function ContainerInfoCard({
   ephemeral,
   defaultExpanded = false,
   onContainerUpdate,
-  children,
 }: {
   container: Container
   status?: ContainerStatus
@@ -86,7 +85,6 @@ export function ContainerInfoCard({
   ephemeral?: boolean
   defaultExpanded?: boolean
   onContainerUpdate?: (updatedContainer: Container) => void
-  children?: ReactNode
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -237,8 +235,6 @@ export function ContainerInfoCard({
             <div className="mt-1">{renderState(status.state)}</div>
           </div>
         )}
-
-        {children}
 
         {/* Toggle */}
         {hasMore && (

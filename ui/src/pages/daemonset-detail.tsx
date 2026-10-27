@@ -20,7 +20,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ContainerInfoCard } from '@/components/container-info-card'
-import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { DaemonSetOverview } from '@/components/daemonset-overview'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
@@ -207,12 +206,7 @@ export function DaemonSetDetail(props: { namespace: string; name: string }) {
                       onContainerUpdate={(updatedContainer) =>
                         handleContainerUpdate(updatedContainer, true)
                       }
-                    >
-                      <ContainerResourceUsage
-                        container={container}
-                        pods={relatedPods}
-                      />
-                    </ContainerInfoCard>
+                    />
                   ))}
                 </div>
               ) : null}
@@ -224,12 +218,7 @@ export function DaemonSetDetail(props: { namespace: string; name: string }) {
                     onContainerUpdate={(updatedContainer) =>
                       handleContainerUpdate(updatedContainer, false)
                     }
-                  >
-                    <ContainerResourceUsage
-                      container={container}
-                      pods={relatedPods}
-                    />
-                  </ContainerInfoCard>
+                  />
                 ))}
               </div>
             </div>

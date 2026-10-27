@@ -27,7 +27,7 @@ pkg/
 ├── middleware/               # auth, cluster (x-cluster-name), cors, logger, metrics, rbac
 ├── common/                   # config vars + LoadEnvs(); shared types; rbac constants
 ├── tracing/                  # (fork) OTel: server, HTTP transport, k8s, GORM, Prometheus, describe
-├── prometheus/ appview/ version/ utils/
+├── prometheus/ version/ utils/
 ```
 
 ## Request pipeline (`app.go` + `routes.go`)

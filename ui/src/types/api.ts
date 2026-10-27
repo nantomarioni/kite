@@ -247,7 +247,7 @@ export interface HelmReleaseInstallRequest {
 }
 
 export interface HelmReleaseUpgradeRequest {
-  chartUrl?: string
+  chartUrl: string
   repositoryName?: string
   source?: 'repository' | 'artifacthub'
   values?: Record<string, unknown>
@@ -769,15 +769,4 @@ export interface ResourceTemplate {
   name: string
   description: string
   yaml: string
-}
-
-export interface AppViewResponse {
-  deployments: Deployment[]
-  statefulSets: StatefulSet[]
-  services: Service[]
-  ingresses: Ingress[]
-  pods: Pod[]
-  configMaps: ConfigMap[]
-  secrets: Secret[]
-  pvcs: PersistentVolumeClaim[]
 }

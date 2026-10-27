@@ -41,7 +41,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ContainerInfoCard } from '@/components/container-info-card'
-import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { DeploymentOverview } from '@/components/deployment-overview'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
@@ -349,12 +348,7 @@ export function DeploymentDetail(props: { namespace: string; name: string }) {
                       onContainerUpdate={(updatedContainer) =>
                         handleContainerUpdate(updatedContainer, true)
                       }
-                    >
-                      <ContainerResourceUsage
-                        container={container}
-                        pods={relatedPods}
-                      />
-                    </ContainerInfoCard>
+                    />
                   ))}
                 </div>
               ) : null}
@@ -366,12 +360,7 @@ export function DeploymentDetail(props: { namespace: string; name: string }) {
                     onContainerUpdate={(updatedContainer) =>
                       handleContainerUpdate(updatedContainer, false)
                     }
-                  >
-                    <ContainerResourceUsage
-                      container={container}
-                      pods={relatedPods}
-                    />
-                  </ContainerInfoCard>
+                  />
                 ))}
               </div>
             </div>

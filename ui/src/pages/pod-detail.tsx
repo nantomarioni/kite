@@ -31,7 +31,6 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { ContainerInfoCard } from '@/components/container-info-card'
-import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { ResourceEditor } from '@/components/editors/resource-editor'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
@@ -227,15 +226,7 @@ export function PodDetail(props: { namespace: string; name: string }) {
                               (s) => s.name === container.name
                             )}
                             init
-                          >
-                            <ContainerResourceUsage
-                              container={container}
-                              status={pod.status?.initContainerStatuses?.find(
-                                (s) => s.name === container.name
-                              )}
-                              pod={pod}
-                            />
-                          </ContainerInfoCard>
+                          />
                         ))}
                       </CardContent>
                     </Card>
@@ -249,15 +240,7 @@ export function PodDetail(props: { namespace: string; name: string }) {
                         status={pod.status?.containerStatuses?.find(
                           (s) => s.name === container.name
                         )}
-                      >
-                        <ContainerResourceUsage
-                          container={container}
-                          status={pod.status?.containerStatuses?.find(
-                            (s) => s.name === container.name
-                          )}
-                          pod={pod}
-                        />
-                      </ContainerInfoCard>
+                      />
                     ))}
                   </CardContent>
                 </Card>

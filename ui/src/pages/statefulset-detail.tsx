@@ -22,7 +22,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ContainerInfoCard } from '@/components/container-info-card'
-import { ContainerResourceUsage } from '@/components/container-resource-usage'
 import { EventTable } from '@/components/event-table'
 import { LogViewer } from '@/components/log-viewer'
 import { PodMonitoring } from '@/components/pod-monitoring'
@@ -254,12 +253,7 @@ export function StatefulSetDetail(props: { namespace: string; name: string }) {
                       onContainerUpdate={(updatedContainer) =>
                         handleContainerUpdate(updatedContainer, true)
                       }
-                    >
-                      <ContainerResourceUsage
-                        container={container}
-                        pods={relatedPods}
-                      />
-                    </ContainerInfoCard>
+                    />
                   ))}
                 </div>
               ) : null}
@@ -271,12 +265,7 @@ export function StatefulSetDetail(props: { namespace: string; name: string }) {
                     onContainerUpdate={(updatedContainer) =>
                       handleContainerUpdate(updatedContainer, false)
                     }
-                  >
-                    <ContainerResourceUsage
-                      container={container}
-                      pods={relatedPods}
-                    />
-                  </ContainerInfoCard>
+                  />
                 ))}
               </div>
             </div>

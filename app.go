@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -32,7 +33,7 @@ func initializeApp(ctx context.Context) (*cluster.ClusterManager, error) {
 		klog.Warningf("Failed to instrument database for tracing: %v", err)
 	}
 	if _, err := model.GetGeneralSetting(); err != nil {
-		klog.Warningf("Failed to load general setting: %v", err)
+		return nil, fmt.Errorf("failed to load general setting: %w", err)
 	}
 
 	rbac.InitRBAC()
